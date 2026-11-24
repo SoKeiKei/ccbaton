@@ -239,6 +239,9 @@ final class Model: ObservableObject {
     /// 截图、预检、自检这类只读模式下为 true：不允许把任何设置写回文件，也不弹小组件
     static var readOnly = false
 
+    /// 演示模式（只用于生成 README 截图）：界面里隐藏本机特有的入口
+    static var demo = false
+
     func save() {
         if Model.readOnly { return }
         if let d = try? JSONEncoder().encode(store) { try? d.write(to: storeURL) }

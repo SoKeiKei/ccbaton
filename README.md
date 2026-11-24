@@ -1,10 +1,12 @@
+<p align="center"><img src="docs/icon.png" width="128" alt="CCBaton"></p>
+
 # CCBaton
 
 **给 Claude Code 用的多账号接力棒。** 住在 Mac 菜单栏和桌面上，一眼看到每个账号还剩多少额度，一键换号继续干活。
 
 *English: CCBaton is a native macOS menu-bar app and desktop widget for people who use several Claude Code subscriptions. It shows each account's 5-hour / 7-day quota, switches the account Claude Code is signed in with in one click, opens an isolated terminal per account, and warns you before a quota runs out. Swift, no dependencies, MIT licensed. Unofficial — not affiliated with Anthropic.*
 
-> 当前版本 **1.0.0**（版本号在 `VERSION` 文件里，面板右下角也能看到）
+> 当前版本 **1.1.0**（版本号在 `VERSION` 文件里，面板右下角也能看到）　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)
 
 ---
 
@@ -22,9 +24,76 @@
 
 ---
 
+## 界面预览
+
+> 截图里的账号、邮箱和用量都是演示用的虚构数据。
+
+### 菜单栏面板
+
+点菜单栏右上角的图标弹出。每个账号一张卡片，绿色边框的是"使用中"。
+
+<p align="center">
+  <img src="docs/screenshots/panel-dark.png" width="400" alt="菜单栏面板（深色）">
+  <img src="docs/screenshots/panel-light.png" width="400" alt="菜单栏面板（浅色）">
+</p>
+
+菜单栏图标是双环：外圈 5 小时，内圈 7 天。用量吃紧时变橙、告急时变红，带淡淡的光晕：
+
+<p align="center"><img src="docs/screenshots/menubar-dark.png" width="420" alt="菜单栏图标的三种状态"></p>
+
+### 桌面小组件
+
+小号、中号、大号三种尺寸，和系统小组件的尺寸一致，拖动时会自动吸附到系统小组件的格子上。账号前面的圆形按钮点一下就切换。
+
+<p align="center">
+  <img src="docs/screenshots/widget-small.png" width="190" alt="小号小组件">
+  <img src="docs/screenshots/widget-medium.png" width="400" alt="中号小组件">
+</p>
+<p align="center">
+  <img src="docs/screenshots/widget-large.png" width="400" alt="大号小组件">
+  <img src="docs/screenshots/widget-medium-light.png" width="400" alt="中号小组件（浅色）">
+</p>
+
+### 额度告警
+
+使用中的账号用到 96%（红），另一个账号 85%（橙）。面板顶部会建议切到还有空的账号，小组件边沿也有红色光晕：
+
+<p align="center">
+  <img src="docs/screenshots/alert-panel.png" width="400" alt="额度告警：面板">
+</p>
+<p align="center">
+  <img src="docs/screenshots/alert-widget.png" width="400" alt="额度告警：中号小组件">
+  <img src="docs/screenshots/alert-widget-small.png" width="190" alt="额度告警：小号小组件">
+</p>
+
+### 修改显示名称
+
+点名字旁边的铅笔。上半部分是这个账号真实登录的 Claude 信息，下半部分填你想显示的名字：
+
+<p align="center"><img src="docs/screenshots/editor.png" width="440" alt="修改显示名称窗口"></p>
+
+---
+
 ## 安装和打开
 
-没有现成的安装包，需要自己编译一次（几十秒）。要求 macOS 14 或更高、装了 Xcode 命令行工具、装好 Claude Code（终端里能运行 `claude`）。
+要求：macOS 14 或更高（Apple 芯片和 Intel 都支持），装好 Claude Code（终端里能运行 `claude`）。
+
+### 方式一：下载安装包（推荐）
+
+1. 打开 [Releases 页面](https://github.com/SoKeiKei/ccbaton/releases/latest)，下载 `CCBaton-版本号-macos.zip`，双击解压，把 `CCBaton.app` 拖进"应用程序"文件夹。
+2. **第一次打开会被 macOS 拦住**，提示"无法验证开发者"或"Apple 无法检查其是否包含恶意软件"。这是因为这是个人开发的免费工具，没有购买 Apple 的开发者账号做"公证"，不是程序有问题。放行一次就行：
+   - 先双击打开一次（会被拦）→ 打开"系统设置 → 隐私与安全性"→ 滚到底，找到 CCBaton 那一行 → 点"仍要打开"，输入密码。
+   - 或者在终端运行一行命令，去掉下载时系统打的"来自网络"标记：
+     ```
+     xattr -dr com.apple.quarantine /Applications/CCBaton.app
+     ```
+3. 想确认下载的文件没被改过：把 Releases 里的 `.sha256` 文件和 zip 放在同一个文件夹，终端运行 `shasum -a 256 -c CCBaton-版本号-macos.zip.sha256`，显示 `OK` 就对了。
+
+> 不放心的话，源码全部公开，可以自己看、自己编译（方式二）。
+
+### 方式二：自己编译
+
+需要装 Xcode 命令行工具（终端运行 `xcode-select --install`），几十秒就编完：
 
 ```
 git clone https://github.com/SoKeiKei/ccbaton.git CCBaton
@@ -33,7 +102,7 @@ cd CCBaton
 open build/CCBaton.app
 ```
 
-之后双击 `build/CCBaton.app` 就能打开。可以把它拖到"应用程序"文件夹里。
+自己编译的版本没有"来自网络"标记，不会被拦。
 
 - 它没有 Dock 图标，打开后菜单栏右上角会出现一个**双环图标**（外圈是 5 小时额度，内圈是 7 天额度）。
 - 想开机自动启动：系统设置 → 通用 → 登录项 → 点 `+` → 选 `CCBaton.app`。
@@ -136,7 +205,11 @@ CCBaton 本身不联网，不收集任何数据。查额度的网络请求是 Cl
 ```
 CCBaton/
 ├── VERSION            版本号（只在这里改）
-├── build.sh           编译并打包成 build/CCBaton.app
+├── build.sh           编译并打包成 build/CCBaton.app（UNIVERSAL=1 编通用版）
+├── package.sh         打发布用的压缩包 dist/CCBaton-版本-macos.zip 和校验码
+├── Resources/         应用图标 AppIcon.icns
+├── tools/make-icon.swift  生成应用图标的脚本（改图标就改它）
+├── docs/              README 用的图片
 ├── README.md
 └── Sources/
     ├── Core.swift       数据、账号列表、额度读取、模型
@@ -153,7 +226,7 @@ CCBaton/
 cd CCBaton
 ./build.sh
 ```
-发新版：先改 `VERSION`，再编译。
+发新版：先改 `VERSION`，运行 `./package.sh` 打包（通用版 + 校验码），再到 GitHub 创建 Release 上传 `dist/` 里的两个文件。
 
 ### 命令行参数
 以下用 `./build/CCBaton.app/Contents/MacOS/CCBaton` 运行：
@@ -164,6 +237,7 @@ cd CCBaton
 | `--dump` | 打印读到的账号状态（只读） |
 | `--check` | 对每个账号做"能不能切换"的预检（只读，不写任何东西） |
 | `--snapshot 目录` | 把面板、小组件、编辑窗口、图标渲染成 PNG（只读，不需要屏幕录制权限） |
+| `--readme-shots 目录` | 用虚构的演示数据渲染 README 里的截图（只读，不含任何真实信息） |
 | `--import` | 导入 cc-switch 的账号 |
 | `--alerttest` | 告警逻辑测试（纯计算，不发通知） |
 | `--selftest` / `--widgettest` / `--renametest` | 沙盒测试，**必须**设 `CAB_TEST_ROOT` |
@@ -189,6 +263,12 @@ rm -rf "$T"
 ---
 
 ## 版本记录
+
+### 1.1.0（2026-11-24）
+- 新增应用图标（双环 + 互换箭头，生成脚本在 `tools/make-icon.swift`）
+- 提供预编译安装包（通用版，Apple 芯片和 Intel 都能用）和 SHA-256 校验码
+- 一律按 macOS 14 为目标编译，确认最低系统要求；二进制里不再带本机源码路径
+- README 增加界面截图（用虚构的演示数据生成，`--readme-shots`）
 
 ### 1.0.0（2026-11-24）
 首个正式版，改名 CCBaton。

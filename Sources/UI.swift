@@ -282,7 +282,7 @@ struct MenuView: View {
             Divider().opacity(0.5)
             HStack(spacing: 14) {
                 FooterButton(title: "添加账号", icon: "plus.circle") { showAdd = true }
-                if FileManager.default.fileExists(atPath: home + "/.cc-switch/claude_accounts.json") {
+                if !Model.demo, FileManager.default.fileExists(atPath: home + "/.cc-switch/claude_accounts.json") {
                     FooterButton(title: "导入 cc-switch", icon: "square.and.arrow.down") { model.importCCSwitch() }
                 }
                 Spacer()
@@ -322,25 +322,122 @@ struct MenuView: View {
 // MARK: - 离屏截图（不需要屏幕录制权限），用来检查界面
 
 @MainActor
+func renderPNG<V: View>(_ view: V, dark: Bool, scale: CGFloat = 2, path: String) {
+    let host = NSHostingView(rootView: view)
+    let size = host.fittingSize
+    host.frame = NSRect(origin: .zero, size: size)
+    let win = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    win.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+    win.contentView = host
+    host.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                     bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                     colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
+    rep.size = size
+    host.cacheDisplay(in: host.bounds, to: rep)
+    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+}
+
+/// README 用的演示数据：虚构的账号、邮箱和用量，不含任何真实信息
+@MainActor
+func applyDemo(_ model: Model, live five: Double = 42, liveSeven: Double = 61, second: Double = 8) {
+    Model.demo = true
+    func st(_ email: String, _ plan: String, live: Bool, _ f: Double, _ s: Double, _ fr: TimeInterval, _ sr: TimeInterval) -> AccountState {
+        var a = AccountState()
+        a.live = live; a.loggedIn = true; a.email = email; a.plan = plan; a.orgName = email
+        a.fiveHour = f; a.sevenDay = s
+        a.fiveReset = Date().addingTimeInterval(fr); a.sevenReset = Date().addingTimeInterval(sr)
+        a.fetchedAt = Date().addingTimeInterval(-20)
+        return a
+    }
+    model.store.accounts = [Account(id: "d1", label: "工作", configDir: "/demo/1"),
+                            Account(id: "d2", label: "个人", configDir: "/demo/2"),
+                            Account(id: "d3", label: "备用", configDir: "/demo/3")]
+    model.store.workDir = home + "/Projects/my-app"
+    model.states = [
+        "d1": st("alex.work@example.com", "Max", live: true, five, liveSeven, 2 * 3600 + 35 * 60, 2 * 86400 + 5 * 3600),
+        "d2": st("alex@example.com", "Pro", live: false, second, 23, 3 * 3600 + 10 * 60, 4 * 86400 + 17 * 3600),
+        "d3": st("alex.backup@example.com", "Pro", live: false, 0, 12, 4 * 3600 + 50 * 60, 5 * 86400 + 2 * 3600),
+    ]
+}
+
+/// README 截图：面板、小组件三个尺寸、告警状态、编辑窗口、菜单栏图标。全部用演示数据。
+@MainActor
+func renderReadmeShots(to dir: String) {
+    _ = NSApplication.shared
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let model = Model()
+    applyDemo(model)
+
+    let wall = LinearGradient(colors: [Color(red: 0.16, green: 0.28, blue: 0.50), Color(red: 0.42, green: 0.26, blue: 0.52)],
+                              startPoint: .topLeading, endPoint: .bottomTrailing)
+    let wallLight = LinearGradient(colors: [Color(red: 0.80, green: 0.88, blue: 1.0), Color(red: 0.96, green: 0.84, blue: 0.90)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+    // 菜单栏弹出面板：圆角 + 阴影，放在一块壁纸色背景上
+    func popover(dark: Bool) -> some View {
+        MenuView(model: model)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
+            .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
+            .padding(30)
+            .background(dark ? wall : wallLight)
+    }
+    renderPNG(popover(dark: true), dark: true, path: dir + "/panel-dark.png")
+    renderPNG(popover(dark: false), dark: false, path: dir + "/panel-light.png")
+
+    for s in WidgetSize.allCases {
+        model.store.widgetSize = s.rawValue
+        renderPNG(WidgetView(model: model).padding(16).background(wall), dark: true, path: dir + "/widget-\(s.rawValue).png")
+    }
+    model.store.widgetSize = "medium"
+    renderPNG(WidgetView(model: model).padding(16).background(wallLight), dark: false, path: dir + "/widget-medium-light.png")
+
+    let live = model.store.accounts[0]
+    renderPNG(EditView(model: model, account: live, close: {}).background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(wall),
+        dark: true, path: dir + "/editor.png")
+
+    // 告警：使用中的账号 96%（红），另一个 85%（橙）
+    applyDemo(model, live: 96, liveSeven: 61, second: 85)
+    renderPNG(popover(dark: true), dark: true, path: dir + "/alert-panel.png")
+    renderPNG(WidgetView(model: model).padding(16).background(wall), dark: true, path: dir + "/alert-widget.png")
+    model.store.widgetSize = "small"
+    renderPNG(WidgetView(model: model).padding(16).background(wall), dark: true, path: dir + "/alert-widget-small.png")
+
+    // 菜单栏图标：正常 / 吃紧 / 告急
+    struct Strip: View {
+        let dark: Bool
+        let wall: LinearGradient
+        var body: some View {
+            HStack(spacing: 26) {
+                ForEach([(42.0, 61.0, 0), (85.0, 61.0, 1), (96.0, 61.0, 2)], id: \.0) { p in
+                    HStack(spacing: 5) {
+                        Image(nsImage: ringIcon(five: p.0, seven: p.1, alert: p.2)).resizable().frame(width: 40, height: 40)
+                        Text("\(Int(p.0))%").font(.system(size: 28, weight: .medium)).monospacedDigit()
+                    }
+                }
+            }
+            .padding(.horizontal, 28).padding(.vertical, 16)
+            .foregroundStyle(dark ? Color.white : Color.black)
+            .background(dark ? Color(white: 0.16) : Color(white: 0.93))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(14).background(wall)
+        }
+    }
+    renderPNG(Strip(dark: true, wall: wall), dark: true, path: dir + "/menubar-dark.png")
+    renderPNG(Strip(dark: false, wall: wallLight), dark: false, path: dir + "/menubar-light.png")
+    print("已生成 README 截图到 \(dir)")
+}
+
+@MainActor
 func renderSnapshots(to dir: String) {
     _ = NSApplication.shared
     try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
     func png<V: View>(_ view: V, dark: Bool, scale: CGFloat = 2, file: String) {
-        let host = NSHostingView(rootView: view)
-        let size = host.fittingSize
-        host.frame = NSRect(origin: .zero, size: size)
-        let win = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        win.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        win.contentView = host
-        host.layoutSubtreeIfNeeded()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
-                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
-        rep.size = size
-        host.cacheDisplay(in: host.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/\(file)"))
+        renderPNG(view, dark: dark, scale: scale, path: "\(dir)/\(file)")
     }
 
     let model = Model()
@@ -403,7 +500,12 @@ struct ClaudeAccountBarApp: App {
         let args = CommandLine.arguments
         if args.contains("--version") { print("CCBaton \(appVersion) (构建 \(appBuild))"); exit(0) }
         // 截图、预检、查看状态只读：绝不把设置写回文件（导入 --import 和 --widgettest 例外，后者只在沙盒里跑）
-        if args.contains("--snapshot") || args.contains("--check") || args.contains("--dump") { Model.readOnly = true }
+        if args.contains("--snapshot") || args.contains("--check") || args.contains("--dump") || args.contains("--readme-shots") { Model.readOnly = true }
+        if let i = args.firstIndex(of: "--readme-shots") {
+            let dir = i + 1 < args.count ? args[i + 1] : "docs/screenshots"
+            MainActor.assumeIsolated { renderReadmeShots(to: dir) }
+            exit(0)
+        }
         if let i = args.firstIndex(of: "--snapshot") {
             let dir = i + 1 < args.count ? args[i + 1] : "snapshots"
             MainActor.assumeIsolated { renderSnapshots(to: dir) }
