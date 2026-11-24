@@ -6,7 +6,7 @@
 
 *English: CCBaton is a native macOS menu-bar app and desktop widget for people who use several Claude Code subscriptions. It shows each account's 5-hour / 7-day quota, switches the account Claude Code is signed in with in one click, opens an isolated terminal per account, and warns you before a quota runs out. Swift, no dependencies, MIT licensed. Unofficial — not affiliated with Anthropic.*
 
-> 当前版本 **1.1.0**（版本号在 `VERSION` 文件里，面板右下角也能看到）　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)
+> 当前版本 **1.1.1**（版本号在 `VERSION` 文件里，面板右下角也能看到）　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)
 
 ---
 
@@ -28,49 +28,59 @@
 
 > 截图里的账号、邮箱和用量都是演示用的虚构数据。
 
+<p align="center"><img src="docs/screenshots/hero.png" width="860" alt="CCBaton 总览：菜单栏面板和桌面小组件"></p>
+
 ### 菜单栏面板
 
-点菜单栏右上角的图标弹出。每个账号一张卡片，绿色边框的是"使用中"。
+点菜单栏右上角的图标弹出。每个账号一张卡片，绿色边框的是"使用中"；点"切换"换号，点"终端"用这个账号独立开终端。
 
-<p align="center">
-  <img src="docs/screenshots/panel-dark.png" width="400" alt="菜单栏面板（深色）">
-  <img src="docs/screenshots/panel-light.png" width="400" alt="菜单栏面板（浅色）">
-</p>
+<table>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/screenshots/panel-dark.png" width="380" alt="菜单栏面板（深色）"><br><sub><b>深色</b></sub></td>
+    <td align="center" valign="top" width="50%"><img src="docs/screenshots/panel-light.png" width="380" alt="菜单栏面板（浅色）"><br><sub><b>浅色</b></sub></td>
+  </tr>
+</table>
 
-菜单栏图标是双环：外圈 5 小时，内圈 7 天。用量吃紧时变橙、告急时变红，带淡淡的光晕：
+菜单栏图标是双环：**外圈 5 小时，内圈 7 天**。用量吃紧时变橙、告急时变红，带淡淡的光晕（下面分别是 42% / 85% / 96%）：
 
-<p align="center"><img src="docs/screenshots/menubar-dark.png" width="420" alt="菜单栏图标的三种状态"></p>
+<table>
+  <tr>
+    <td align="center" valign="top" width="50%"><img src="docs/screenshots/menubar-dark.png" width="380" alt="菜单栏图标（深色）"><br><sub><b>深色菜单栏</b></sub></td>
+    <td align="center" valign="top" width="50%"><img src="docs/screenshots/menubar-light.png" width="380" alt="菜单栏图标（浅色）"><br><sub><b>浅色菜单栏</b></sub></td>
+  </tr>
+</table>
 
 ### 桌面小组件
 
-小号、中号、大号三种尺寸，和系统小组件的尺寸一致，拖动时会自动吸附到系统小组件的格子上。账号前面的圆形按钮点一下就切换。
+三种尺寸，和系统小组件的尺寸一致；拖动时会自动吸附到系统小组件的格子上。账号前面的圆形按钮点一下就切换。
 
-<p align="center">
-  <img src="docs/screenshots/widget-small.png" width="190" alt="小号小组件">
-  <img src="docs/screenshots/widget-medium.png" width="400" alt="中号小组件">
-</p>
-<p align="center">
-  <img src="docs/screenshots/widget-large.png" width="400" alt="大号小组件">
-  <img src="docs/screenshots/widget-medium-light.png" width="400" alt="中号小组件（浅色）">
-</p>
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="docs/screenshots/widget-small.png" width="165" alt="小号小组件"><br><sub><b>小号</b><br>只看使用中的账号</sub></td>
+    <td align="center" valign="top"><img src="docs/screenshots/widget-medium.png" width="306" alt="中号小组件"><br><sub><b>中号</b><br>每个账号一行</sub></td>
+    <td align="center" valign="top"><img src="docs/screenshots/widget-large.png" width="306" alt="大号小组件"><br><sub><b>大号</b><br>带重置倒计时</sub></td>
+  </tr>
+</table>
 
 ### 额度告警
 
-使用中的账号用到 96%（红），另一个账号 85%（橙）。面板顶部会建议切到还有空的账号，小组件边沿也有红色光晕：
+使用中的账号用到 96%（红），另一个账号 85%（橙）：面板顶部会建议切到还有空的账号，卡片和小组件的边沿有一圈光晕，告急时光晕会缓慢"呼吸"。
 
-<p align="center">
-  <img src="docs/screenshots/alert-panel.png" width="400" alt="额度告警：面板">
-</p>
-<p align="center">
-  <img src="docs/screenshots/alert-widget.png" width="400" alt="额度告警：中号小组件">
-  <img src="docs/screenshots/alert-widget-small.png" width="190" alt="额度告警：小号小组件">
-</p>
+<table>
+  <tr>
+    <td align="center" valign="top" rowspan="2" width="50%"><img src="docs/screenshots/alert-panel.png" width="360" alt="额度告警：面板"><br><sub><b>面板</b></sub></td>
+    <td align="center" valign="top" width="50%"><img src="docs/screenshots/alert-widget.png" width="333" alt="额度告警：中号小组件"><br><sub><b>中号小组件</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top"><img src="docs/screenshots/alert-widget-small.png" width="180" alt="额度告警：小号小组件"><br><sub><b>小号小组件</b></sub></td>
+  </tr>
+</table>
 
 ### 修改显示名称
 
-点名字旁边的铅笔。上半部分是这个账号真实登录的 Claude 信息，下半部分填你想显示的名字：
+点名字旁边的铅笔。上半部分是这个账号真实登录的 Claude 信息，下半部分填你想显示的名字（留空就显示邮箱）：
 
-<p align="center"><img src="docs/screenshots/editor.png" width="440" alt="修改显示名称窗口"></p>
+<p align="center"><img src="docs/screenshots/editor.png" width="420" alt="修改显示名称窗口"></p>
 
 ---
 
@@ -218,6 +228,7 @@ CCBaton/
     ├── Widget.swift     桌面小组件
     ├── Editor.swift     修改显示名称的窗口
     ├── Alerts.swift     额度告警：等级、光晕、通知
+    ├── Driver.swift     自动驾驶测试（沙盒里模拟一通乱点）
     └── SelfTest.swift   切换引擎的沙盒自检
 ```
 
@@ -251,6 +262,14 @@ rm -rf "$T"
 
 `--snapshot`、`--check`、`--dump` 是只读模式：不会自动刷新额度，也绝不会写设置文件。
 
+**自动驾驶测试**（排查布局、动画类崩溃用）：让真实运行的程序自己去点菜单栏图标、切换小组件尺寸、显示/隐藏小组件、刷新数据，跑 45 秒，崩了会返回非 0。只能在沙盒里跑：
+```
+T=$(mktemp -d)
+CAB_TEST_ROOT=$T CAB_DRIVE=1 ./build/CCBaton.app/Contents/MacOS/CCBaton
+rm -rf "$T"
+```
+可选环境变量：`CAB_DRIVE_SECONDS=20` 缩短时长；`CAB_DRIVE_SKIP=click,resize,toggle,data` 关掉某类操作做"排除法"。运行时屏幕上会有面板弹出收起、小组件变化。
+
 ---
 
 ## 许可证与声明
@@ -263,6 +282,11 @@ rm -rf "$T"
 ---
 
 ## 版本记录
+
+### 1.1.1（2026-11-24）
+**修复崩溃**：反复切换小组件尺寸、显示/隐藏小组件时，程序可能崩溃（AppKit 报"Update Constraints in Window pass"布局死循环异常）。原因是 SwiftUI 的承载视图直接当窗口的内容视图时，会在窗口布局通知里自己调整窗口大小，和程序手动调整窗口大小互相触发。现在改成在窗口里套一层普通 AppKit 容器视图，并让承载视图不参与窗口的约束布局。已用"自动驾驶测试"复现并验证（修复前 4 秒内必崩，修复后连续 45 秒、点图标 25 次、换尺寸 37 次、显示/隐藏 13 次无崩溃）。**1.1.0 的用户请升级。**
+
+- README 截图重新排版：加了总览大图，分项截图统一成带说明的表格
 
 ### 1.1.0（2026-11-24）
 - 新增应用图标（双环 + 互换箭头，生成脚本在 `tools/make-icon.swift`）

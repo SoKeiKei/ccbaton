@@ -88,11 +88,17 @@ final class AccountEditor {
             self?.window = nil
         })
         let host = NSHostingView(rootView: view)
-        let w = NSWindow(contentRect: NSRect(origin: .zero, size: host.fittingSize),
+        let size = host.fittingSize
+        host.sizingOptions = []                  // 窗口大小固定，不让内容的布局反过来牵着窗口走
+        let w = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "修改账号名称"
-        w.contentView = host
-        w.setContentSize(host.fittingSize)
+        let container = NSView(frame: NSRect(origin: .zero, size: size))      // 同样套一层容器，避免 SwiftUI 自己改窗口大小
+        host.frame = container.bounds
+        host.autoresizingMask = [.width, .height]
+        container.addSubview(host)
+        w.contentView = container
+        w.setContentSize(size)
         w.center()
         w.isReleasedWhenClosed = false
         w.level = .floating

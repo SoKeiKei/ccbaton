@@ -104,7 +104,9 @@ struct WidgetView: View {
     /// 告警光晕看正在使用的账号
     var glowLevel: Int { model.live.flatMap { model.states[$0.id] }?.level ?? 0 }
 
-    var size: WidgetSize { WidgetSize(rawValue: model.store.widgetSize ?? "") ?? .medium }
+    /// 指定尺寸（只用于生成总览截图，正常使用时跟随设置）
+    var forceSize: WidgetSize? = nil
+    var size: WidgetSize { forceSize ?? WidgetSize(rawValue: model.store.widgetSize ?? "") ?? .medium }
     var inset: CGFloat { WidgetSize.inset }
 
     var body: some View {
@@ -266,6 +268,12 @@ struct WidgetView: View {
 
 // MARK: - 承载视图：既要让按钮能点，又要能按住空白处拖动窗口
 
+/// 小组件窗口的内容视图（普通 AppKit 视图，里面再放 SwiftUI 承载视图）。
+/// 面板不抢焦点，窗口不是 key 窗口时，AppKit 问内容视图"要不要接受第一下点击"，必须答要，否则按钮点不动。
+final class WidgetContainerView: NSView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 final class WidgetHostingView: NSHostingView<WidgetView> {
     var onDragEnd: (() -> Void)?
     private var startMouse = NSPoint.zero
@@ -328,6 +336,7 @@ final class WidgetController {
     static let shared = WidgetController()
     private(set) var panel: NSPanel?
     private(set) var host: WidgetHostingView?
+    private weak var model: Model?
     private var bag = Set<AnyCancellable>()
     /// 测试时可以替换
     var framesProvider: () -> [CGRect] = systemWidgetFrames
@@ -342,6 +351,13 @@ final class WidgetController {
     func toggle(_ model: Model) { isVisible ? hide(model) : show(model) }
 
     private var primaryHeight: CGFloat { NSScreen.screens.first?.frame.height ?? 0 }
+
+    /// 量一下小组件内容现在需要多大。用一个不挂在任何窗口上的临时视图去量：
+    /// 窗口里的视图不再把"理想尺寸"变化反馈给窗口的布局约束，否则动画期间窗口和内容互相牵扯，
+    /// 会触发 AppKit 的布局死循环保护（"Update Constraints in Window pass" 异常）而崩溃。
+    func desiredSize(_ model: Model) -> NSSize {
+        NSHostingView(rootView: WidgetView(model: model)).fittingSize
+    }
 
     /// 把窗口吸到系统小组件的格子上（左上角对齐）
     func snap(_ p: NSPanel) {
@@ -360,10 +376,18 @@ final class WidgetController {
                               },
                               onResize: { [weak self] s in self?.changeSize(model, to: s) })
         let host = WidgetHostingView(rootView: view)
-        let size = host.fittingSize
+        host.sizingOptions = []                  // 不参与窗口的约束布局，窗口大小完全由我们自己控制
+        let size = desiredSize(model)
         let p = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        p.contentView = host
+        // 不让 SwiftUI 的承载视图直接当窗口的内容视图：套一层普通的 AppKit 容器，承载视图跟着容器伸缩。
+        // 承载视图一旦是 contentView，SwiftUI 会在窗口布局的通知里自己调整窗口大小，和我们手动调整互相打架，
+        // 触发 AppKit 的布局死循环保护而崩溃（"Update Constraints in Window pass" 异常）。
+        let container = WidgetContainerView(frame: NSRect(origin: .zero, size: size))
+        host.frame = container.bounds
+        host.autoresizingMask = [.width, .height]
+        container.addSubview(host)
+        p.contentView = container
         p.isOpaque = false
         p.backgroundColor = .clear
         p.hasShadow = false                      // 毛玻璃本身有边，不再叠系统阴影
@@ -389,6 +413,7 @@ final class WidgetController {
         }
         panel = p
         self.host = host
+        self.model = model
 
         // 松开鼠标：吸附到格子，并记住位置（左上角）
         host.onDragEnd = { [weak self, weak model, weak p] in
@@ -427,8 +452,8 @@ final class WidgetController {
     }
 
     func fit() {
-        guard !resizing, let p = panel, let host else { return }
-        let new = host.fittingSize
+        guard !resizing, let p = panel, let model = model else { return }
+        let new = desiredSize(model)
         var f = p.frame
         guard abs(f.height - new.height) > 0.5 || abs(f.width - new.width) > 0.5 else { return }
         f.origin.y += f.height - new.height
@@ -445,6 +470,7 @@ final class WidgetController {
         }
         panel = nil
         host = nil
+        self.model = nil
         bag.removeAll()
         model.store.widgetVisible = false
         model.save()

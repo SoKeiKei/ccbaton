@@ -406,6 +406,29 @@ func renderReadmeShots(to dir: String) {
     model.store.widgetSize = "small"
     renderPNG(WidgetView(model: model).padding(16).background(wall), dark: true, path: dir + "/alert-widget-small.png")
 
+    // 总览大图：面板 + 中号小组件 + 大号小组件，摆在同一块壁纸上
+    applyDemo(model)
+    struct Hero: View {
+        @ObservedObject var model: Model
+        let wall: LinearGradient
+        var body: some View {
+            HStack(alignment: .top, spacing: 26) {
+                MenuView(model: model)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
+                    .shadow(color: .black.opacity(0.35), radius: 18, y: 9)
+                VStack(alignment: .leading, spacing: 8) {
+                    WidgetView(model: model, forceSize: .medium)
+                    WidgetView(model: model, forceSize: .large)
+                }
+            }
+            .padding(.horizontal, 44).padding(.vertical, 40)
+            .background(wall)
+        }
+    }
+    renderPNG(Hero(model: model, wall: wall), dark: true, path: dir + "/hero.png")
+
     // 菜单栏图标：正常 / 吃紧 / 告急
     struct Strip: View {
         let dark: Bool
@@ -622,6 +645,9 @@ struct ClaudeAccountBarApp: App {
                 c.show(m)
                 guard let p = c.panel, let h = c.host else { print("失败：小组件没有出现"); failed += 1; return }
                 check("中号窗口大小和系统一致（360×180）", abs(p.frame.width - 360) < 1 && abs(p.frame.height - 180) < 1)
+                // 真实使用时点击发生在窗口显示很久之后，界面早已布局完成；测试里要先让它跑一轮布局
+                RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+                p.contentView?.layoutSubtreeIfNeeded()
 
                 // 3. 点击：在整个窗口上每隔 6pt 点一下，看哪些点会触发切换
                 func ev(_ t: NSEvent.EventType, _ x: CGFloat, _ y: CGFloat) -> NSEvent {

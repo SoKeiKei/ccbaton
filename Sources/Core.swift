@@ -234,6 +234,7 @@ final class Model: ObservableObject {
             Task { await refreshAll(force: false) }
         }
         if !Model.readOnly { Task { @MainActor in WidgetController.shared.apply(self) } }
+        if Driver.enabled { Task { @MainActor in try? await Task.sleep(nanoseconds: 1_500_000_000); Driver.start(self, seconds: 45) } }
     }
 
     /// 截图、预检、自检这类只读模式下为 true：不允许把任何设置写回文件，也不弹小组件
