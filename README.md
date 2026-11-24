@@ -6,7 +6,7 @@
 
 *English: CCBaton is a native macOS menu-bar app and desktop widget for people who use several Claude Code subscriptions. It shows each account's 5-hour / 7-day quota, switches the account Claude Code is signed in with in one click, opens an isolated terminal per account, and warns you before a quota runs out. Swift, no dependencies, MIT licensed. Unofficial — not affiliated with Anthropic.*
 
-> 当前版本 **1.1.1**（版本号在 `VERSION` 文件里，面板右下角也能看到）　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)
+> 当前版本 **1.2.0**（版本号在 `VERSION` 文件里，面板右下角也能看到）　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)
 
 ---
 
@@ -20,6 +20,7 @@
 | 额度告警 | 用量吃紧时变橙、告急时变红，带淡淡的光晕；快用完时弹一条系统通知 |
 | 桌面小组件 | 贴在桌面上，尺寸和位置对齐系统小组件，账号前面直接有切换按钮 |
 | 改名 | 给账号起个好认的名字（比如"工作""个人"），不会改动真实登录 |
+| 开机启动 | 面板里一个开关，登录 Mac 时自动启动 |
 | 导入 cc-switch | 一键把 [cc-switch](https://github.com/farion1231/cc-switch) 里已有的账号接过来 |
 
 ---
@@ -115,7 +116,9 @@ open build/CCBaton.app
 自己编译的版本没有"来自网络"标记，不会被拦。
 
 - 它没有 Dock 图标，打开后菜单栏右上角会出现一个**双环图标**（外圈是 5 小时额度，内圈是 7 天额度）。
-- 想开机自动启动：系统设置 → 通用 → 登录项 → 点 `+` → 选 `CCBaton.app`。
+- **开机自动启动**：点面板右下角的"开机启动"开关。它用的是 macOS 正规的登录项，在"系统设置 → 通用 → 登录项"里也能看到、能关。
+  - 请先把 `CCBaton.app` 放进"应用程序"文件夹再开启。放在外接盘或下载文件夹里的话，开机时那个位置可能还没准备好，会悄悄启动失败。
+  - 第一次开启时，系统可能会弹一条"已添加登录项"的提示，或者要你到"系统设置 → 通用 → 登录项"里点一下允许。
 
 ---
 
@@ -229,6 +232,7 @@ CCBaton/
     ├── Editor.swift     修改显示名称的窗口
     ├── Alerts.swift     额度告警：等级、光晕、通知
     ├── Driver.swift     自动驾驶测试（沙盒里模拟一通乱点）
+    ├── LoginItem.swift  开机启动（系统登录项）
     └── SelfTest.swift   切换引擎的沙盒自检
 ```
 
@@ -249,6 +253,7 @@ cd CCBaton
 | `--check` | 对每个账号做"能不能切换"的预检（只读，不写任何东西） |
 | `--snapshot 目录` | 把面板、小组件、编辑窗口、图标渲染成 PNG（只读，不需要屏幕录制权限） |
 | `--readme-shots 目录` | 用虚构的演示数据渲染 README 里的截图（只读，不含任何真实信息） |
+| `--login-item on｜off｜status` | 开启 / 关闭 / 查看开机启动（注册的是这次运行的那份 `.app`，请从"应用程序"里运行） |
 | `--import` | 导入 cc-switch 的账号 |
 | `--alerttest` | 告警逻辑测试（纯计算，不发通知） |
 | `--selftest` / `--widgettest` / `--renametest` | 沙盒测试，**必须**设 `CAB_TEST_ROOT` |
@@ -282,6 +287,10 @@ rm -rf "$T"
 ---
 
 ## 版本记录
+
+### 1.2.0（2026-11-24）
+- 新增**开机启动**开关（面板右下角），用 macOS 正规的登录项接口，也提供命令行 `--login-item`
+- 开启前会提醒：应用放在外接盘上时，开机可能启动失败，建议放进"应用程序"文件夹
 
 ### 1.1.1（2026-11-24）
 **修复崩溃**：反复切换小组件尺寸、显示/隐藏小组件时，程序可能崩溃（AppKit 报"Update Constraints in Window pass"布局死循环异常）。原因是 SwiftUI 的承载视图直接当窗口的内容视图时，会在窗口布局通知里自己调整窗口大小，和程序手动调整窗口大小互相触发。现在改成在窗口里套一层普通 AppKit 容器视图，并让承载视图不参与窗口的约束布局。已用"自动驾驶测试"复现并验证（修复前 4 秒内必崩，修复后连续 45 秒、点图标 25 次、换尺寸 37 次、显示/隐藏 13 次无崩溃）。**1.1.0 的用户请升级。**

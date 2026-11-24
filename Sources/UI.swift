@@ -225,6 +225,7 @@ struct MenuView: View {
     @ObservedObject var model: Model
     @State private var showAdd = false
     @State private var newLabel = ""
+    @State private var loginOn = LoginItem.enabled
     @State private var shown = true          // 弹出动效：false → true 时整个面板弹出、卡片依次浮现
 
     /// 每次打开面板就重播一遍弹出动效
@@ -295,6 +296,12 @@ struct MenuView: View {
                 FooterButton(title: (model.store.workDir as NSString).abbreviatingWithTildeInPath, icon: "folder") { model.chooseWorkDir() }
                     .lineLimit(1).truncationMode(.middle).help("打开终端时进入的目录，点击修改")
                 Spacer(minLength: 8)
+                FooterButton(title: loginOn ? "开机启动：开" : "开机启动：关", icon: loginOn ? "power.circle.fill" : "power.circle") {
+                    do { try LoginItem.set(!loginOn); model.notice = LoginItem.needsApproval ? "需要在系统设置 → 通用 → 登录项 里允许 CCBaton" : nil }
+                    catch { model.notice = "开机启动设置失败：\(error.localizedDescription)" }
+                    loginOn = LoginItem.enabled
+                }
+                .help(Bundle.main.bundlePath.hasPrefix("/Volumes/") ? "注意：应用放在外接盘上，开机时盘没挂载好会启动失败，建议放进\"应用程序\"文件夹再开启" : "登录 Mac 时自动启动 CCBaton")
                 Text("v\(appVersion)").font(.caption2).foregroundStyle(.tertiary).help("CCBaton \(appVersion)（构建 \(appBuild)）")
             }
         }
@@ -303,7 +310,7 @@ struct MenuView: View {
         .scaleEffect(shown ? 1 : 0.95, anchor: .top)
         .opacity(shown ? 1 : 0)
         .animation(.spring(response: 0.34, dampingFraction: 0.8), value: shown)
-        .onAppear { if !Model.readOnly { model.notice = nil; model.reloadStates() }; replay() }
+        .onAppear { loginOn = LoginItem.enabled; if !Model.readOnly { model.notice = nil; model.reloadStates() }; replay() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { n in
             // 点菜单栏图标弹出面板时，面板窗口会成为 key 窗口：重播弹出动效（小组件和编辑窗口不算）
             guard let w = n.object as? NSWindow, w !== WidgetController.shared.panel, w !== AccountEditor.shared.window else { return }
@@ -521,6 +528,7 @@ struct ClaudeAccountBarApp: App {
     @StateObject private var model = Model()
     init() {
         let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--login-item") { exit(LoginItem.runCLI(i + 1 < args.count ? args[i + 1] : "status")) }
         if args.contains("--version") { print("CCBaton \(appVersion) (构建 \(appBuild))"); exit(0) }
         // 截图、预检、查看状态只读：绝不把设置写回文件（导入 --import 和 --widgettest 例外，后者只在沙盒里跑）
         if args.contains("--snapshot") || args.contains("--check") || args.contains("--dump") || args.contains("--readme-shots") { Model.readOnly = true }
