@@ -84,15 +84,10 @@ func alertsToFire(accounts: [Account], states: [String: AccountState], alerted: 
         let keys = reached.map { "\(live.id)|\(label)|\(epoch)|\($0)" }
         guard let top = reached.last, !alerted.contains(keys.last!) else { continue }
 
-        // 找一个还有空的账号当建议
-        let better = accounts.filter { $0.id != live.id }
-            .compactMap { a -> (Account, Double)? in
-                guard let s = states[a.id], s.loggedIn else { return nil }
-                return (a, max(s.fiveHour ?? 0, s.sevenDay ?? 0))
-            }
-            .filter { $0.1 < 70 }.min { $0.1 < $1.1 }
+        // 找一个还有空的账号当建议（和面板上的"推荐"同一个规则）
+        let better = recommendedAccount(accounts: accounts, states: states, now: now)
         let resetLine = reset.map { resetText($0) } ?? ""
-        let suggest = better.map { "「\(name($0.0))」还有空（已用 \(Int($0.1))%），可以在 CCBaton 里一键切换。" } ?? "其他账号也不太宽裕，注意节省。"
+        let suggest = better.map { "「\(name($0.account))」还有空（已用 \(Int($0.used))%），可以在 CCBaton 里一键切换。" } ?? "其他账号也不太宽裕，注意节省。"
         let title = top >= 100 ? "\(name(live)) 的\(label)额度已用完" : "\(name(live)) 的\(label)额度快用完了（\(Int(v))%）"
         items.append(AlertItem(keys: keys, title: title, body: [resetLine, suggest].filter { !$0.isEmpty }.joined(separator: "，")))
     }

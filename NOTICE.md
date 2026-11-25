@@ -1,10 +1,18 @@
 # 致谢与第三方声明
 
+## GitHub 图标
+
+设置窗口右下角的 GitHub 图标取自 GitHub 的图标库 [Octicons](https://github.com/primer/octicons)
+（MIT 许可，Copyright (c) GitHub Inc.）。GitHub 标志是 GitHub, Inc. 的商标，这里只用来链接到本项目的仓库。
+
 ## cc-switch
 
 CCBaton 的"切换 Claude Code 登录"引擎（`Sources/Switcher.swift`）参考了
 [cc-switch](https://github.com/farion1231/cc-switch) 公开源码里 `claude_account` 模块的设计思路
 （账号槽位、把登录"移"进默认槽位、刷新锁、写后读回校验、日志与崩溃补完），用 Swift 重新实现。
+
+"打开终端"（`Sources/Terminal.swift`、`Sources/Isolation.swift`）同样参考了它：选目录和启动参数的窗口、
+沿用账号现有登录的规则、启动前要清掉的环境变量清单，以及把默认配置里的 MCP 服务器带进账号目录的做法。
 cc-switch 以 MIT 许可发布，其许可声明如下：
 
 ```

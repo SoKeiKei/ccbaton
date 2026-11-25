@@ -61,13 +61,21 @@ struct EditView: View {
                     .font(.system(size: 11)).foregroundStyle(.tertiary)
             }
 
-            HStack {
-                if !current.label.isEmpty {
-                    Button("恢复默认") { name = "" ; save() }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Button { model.requestRemoval(current) } label: {
+                        Text("移除账号…").foregroundStyle(model.removalBlocker(current) == nil ? Color.red : Color.secondary)
+                    }
+                    .disabled(model.removalBlocker(current) != nil)
+                    if !current.label.isEmpty {
+                        Button("恢复默认") { name = "" ; save() }
+                    }
+                    Spacer()
+                    Button("取消") { close() }.keyboardShortcut(.cancelAction)
+                    Button("保存") { save() }.keyboardShortcut(.defaultAction)
                 }
-                Spacer()
-                Button("取消") { close() }.keyboardShortcut(.cancelAction)
-                Button("保存") { save() }.keyboardShortcut(.defaultAction)
+                // 这一行始终占着位置：窗口大小打开时就定了
+                Text(model.removalBlocker(current).map { $0 + "。" } ?? " ").font(.system(size: 11)).foregroundStyle(.tertiary)
             }
         }
         .padding(20)

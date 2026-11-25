@@ -143,6 +143,7 @@ struct WidgetView: View {
             }
             Divider()
             Button("刷新额度") { Task { model.reloadStates(); await model.refreshAll(force: true) } }
+            Button("设置…") { SettingsController.shared.open(model) }
             Button("隐藏小组件") { onHide() }
         }
     }
@@ -172,7 +173,8 @@ struct WidgetView: View {
     var small: some View {
         let a = model.live
         let st = a.flatMap { model.states[$0.id] }
-        let others = model.store.accounts.filter { $0.id != a?.id }
+        // 右下角最多放三个头像的位置；更多时放两个加一个"+N"
+        let others = widgetSelection(model.store.accounts.filter { $0.id != a?.id }, liveId: nil, capacity: 3)
         return VStack(spacing: 2) {
             HStack(spacing: 5) {
                 Circle().fill(Color.green).frame(width: 6, height: 6)
@@ -185,83 +187,169 @@ struct WidgetView: View {
             HStack(spacing: 6) {
                 Text("7 天 \(st?.sevenDay.map { "\(Int($0))%" } ?? "—")").font(.system(size: 10)).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
-                ForEach(others.prefix(3)) { o in
+                ForEach(others.shown) { o in
                     let os = model.states[o.id] ?? AccountState()
                     Button { if os.loggedIn { onSwitch(o) } } label: {
                         Text(String(model.shortDisplayName(o).prefix(1)).uppercased())
                             .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
                             .frame(width: 22, height: 22)
-                            .background(Circle().fill(os.loggedIn ? avatarColor(os.email.isEmpty ? o.id : os.email) : Color.gray.opacity(0.5)))
+                            .background(Circle().fill(os.loggedIn ? model.avatarColor(of: o) : Color.gray.opacity(0.5)))
                     }
                     .buttonStyle(.plain).help("切换到 \(model.shortDisplayName(o))")
+                }
+                if !others.hidden.isEmpty {
+                    Button { showMore(others.hidden) } label: {
+                        Text("+\(others.hidden.count)").font(.system(size: 10, weight: .bold))
+                            .frame(width: 22, height: 22).background(Circle().fill(Color.primary.opacity(0.16)))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain).help("其他账号")
                 }
             }
         }
         .frame(maxHeight: .infinity)
     }
 
-    // 中号：每个账号一行：切换按钮 + 名字 + 两条进度
-    var medium: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header()
-            Spacer(minLength: 6)
-            VStack(spacing: 8) {
-                ForEach(model.store.accounts) { a in
-                    let st = model.states[a.id] ?? AccountState()
-                    HStack(spacing: 9) {
-                        SwitchBadge(live: st.live, usable: usable(st), size: 26) { onSwitch(a) }
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(model.shortDisplayName(a)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                            Text(st.live ? "使用中" : (st.plan.isEmpty ? " " : st.plan))
-                                .font(.system(size: 9, weight: st.live ? .semibold : .regular))
-                                .foregroundStyle(st.live ? Color.green : Color.secondary)
-                        }
-                        .frame(width: 70, alignment: .leading)
-                        if st.loggedIn {
-                            StackMeter(title: "5 小时", value: st.fiveHour)
-                            StackMeter(title: "7 天", value: st.sevenDay)
-                        } else {
-                            Text("登录已失效，需要重新登录").font(.system(size: 10)).foregroundStyle(.orange)
-                            Spacer(minLength: 0)
-                        }
-                    }
-                }
+    func showMore(_ hidden: [Account]) {
+        AccountPopup.present(AccountPopup.menu(model, accounts: hidden, onSwitch: onSwitch))
+    }
+
+    /// "还有 N 个"：点开菜单挑一个
+    func moreButton(_ hidden: [Account], _ text: String) -> some View {
+        Button { showMore(hidden) } label: {
+            HStack(spacing: 3) {
+                Text(text)
+                Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
             }
-            Spacer(minLength: 0)
+            .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 一行：切换按钮 + 名字 + 两条进度
+    func accountLine(_ a: Account, badge: CGFloat) -> some View {
+        let st = model.states[a.id] ?? AccountState()
+        return HStack(spacing: 9) {
+            SwitchBadge(live: st.live, usable: usable(st), size: badge) { onSwitch(a) }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.shortDisplayName(a)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text(st.live ? "使用中" : (st.plan.isEmpty ? " " : st.plan))
+                    .font(.system(size: 9, weight: st.live ? .semibold : .regular))
+                    .foregroundStyle(st.live ? Color.green : Color.secondary)
+            }
+            .frame(width: 70, alignment: .leading)
+            if st.loggedIn {
+                StackMeter(title: "5 小时", value: st.fiveHour)
+                StackMeter(title: "7 天", value: st.sevenDay)
+            } else {
+                Text("登录已失效，需要重新登录").font(.system(size: 10)).foregroundStyle(.orange)
+                Spacer(minLength: 0)
+            }
         }
     }
 
-    // 大号：每个账号一块，带重置倒计时
-    var large: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header(12)
-            Spacer(minLength: 10)
-            VStack(spacing: 14) {
-                ForEach(model.store.accounts) { a in
-                    let st = model.states[a.id] ?? AccountState()
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 9) {
-                            SwitchBadge(live: st.live, usable: usable(st), size: 28) { onSwitch(a) }
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(model.shortDisplayName(a)).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                                Text(st.live ? "使用中" : (st.plan.isEmpty ? " " : st.plan))
-                                    .font(.system(size: 10, weight: st.live ? .semibold : .regular))
-                                    .foregroundStyle(st.live ? Color.green : Color.secondary)
+    // 中号：3 个以内每个账号一行；更多时两列，最多 6 格
+    @ViewBuilder var medium: some View {
+        if model.store.accounts.count <= 3 {
+            VStack(alignment: .leading, spacing: 0) {
+                header()
+                Spacer(minLength: 6)
+                VStack(spacing: 8) {
+                    ForEach(model.store.accounts) { a in accountLine(a, badge: 26) }
+                }
+                Spacer(minLength: 0)
+            }
+        } else {
+            let pick = widgetSelection(model.store.accounts, liveId: model.live?.id, capacity: 6)
+            let cells = pick.shown.count + (pick.hidden.isEmpty ? 0 : 1)
+            VStack(alignment: .leading, spacing: 0) {
+                header()
+                Spacer(minLength: 5)
+                VStack(spacing: 5) {
+                    ForEach(Array(stride(from: 0, to: cells, by: 2)), id: \.self) { row in
+                        HStack(spacing: 12) {
+                            ForEach(row..<(row + 2), id: \.self) { i in
+                                Group {
+                                    if i < pick.shown.count { tile(pick.shown[i]) }
+                                    else if i == pick.shown.count && !pick.hidden.isEmpty { moreButton(pick.hidden, "还有 \(pick.hidden.count) 个") }
+                                    else { Color.clear }
+                                }
+                                .frame(maxWidth: .infinity).frame(height: 33)
                             }
-                            Spacer(minLength: 0)
-                        }
-                        if st.loggedIn {
-                            HStack(alignment: .top, spacing: 16) {
-                                Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset)
-                                Meter(title: "7 天", value: st.sevenDay, reset: st.sevenReset)
-                            }
-                        } else {
-                            Text("登录已失效，需要重新登录").font(.system(size: 11)).foregroundStyle(.orange)
                         }
                     }
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+        }
+    }
+
+    /// 中号两列布局里的一格
+    func tile(_ a: Account) -> some View {
+        let st = model.states[a.id] ?? AccountState()
+        return HStack(spacing: 7) {
+            SwitchBadge(live: st.live, usable: usable(st), size: 24) { onSwitch(a) }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.shortDisplayName(a)).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                    .foregroundStyle(st.live ? Color.green : Color.primary)
+                if st.loggedIn {
+                    HStack(spacing: 6) {
+                        MiniMeter(title: "5时", value: st.fiveHour)
+                        MiniMeter(title: "7天", value: st.sevenDay)
+                    }
+                } else {
+                    Text("需要重新登录").font(.system(size: 9)).foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    // 大号：3 个以内每个账号一块（带重置倒计时）；更多时每个一行，最多 8 行
+    @ViewBuilder var large: some View {
+        if model.store.accounts.count <= 3 {
+            VStack(alignment: .leading, spacing: 0) {
+                header(12)
+                Spacer(minLength: 10)
+                VStack(spacing: 14) {
+                    ForEach(model.store.accounts) { a in
+                        let st = model.states[a.id] ?? AccountState()
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 9) {
+                                SwitchBadge(live: st.live, usable: usable(st), size: 28) { onSwitch(a) }
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(model.shortDisplayName(a)).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                                    Text(st.live ? "使用中" : (st.plan.isEmpty ? " " : st.plan))
+                                        .font(.system(size: 10, weight: st.live ? .semibold : .regular))
+                                        .foregroundStyle(st.live ? Color.green : Color.secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            if st.loggedIn {
+                                HStack(alignment: .top, spacing: 16) {
+                                    Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset, idle: st.fiveIdle)
+                                    Meter(title: "7 天", value: st.sevenDay, reset: st.sevenReset)
+                                }
+                            } else {
+                                Text("登录已失效，需要重新登录").font(.system(size: 11)).foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        } else {
+            let pick = widgetSelection(model.store.accounts, liveId: model.live?.id, capacity: 8)
+            VStack(alignment: .leading, spacing: 0) {
+                header(12)
+                Spacer(minLength: 8)
+                VStack(spacing: 8) {
+                    ForEach(pick.shown) { a in accountLine(a, badge: 24).frame(height: 28) }
+                    if !pick.hidden.isEmpty { moreButton(pick.hidden, "还有 \(pick.hidden.count) 个账号") }
+                }
+                Spacer(minLength: 0)
+            }
         }
     }
 }

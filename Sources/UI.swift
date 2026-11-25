@@ -24,13 +24,6 @@ func agoText(_ d: Date?) -> String {
     return "\(s / 3600)小时前更新"
 }
 
-/// 按邮箱算一个稳定的头像颜色
-func avatarColor(_ seed: String) -> Color {
-    var h: UInt64 = 1469598103934665603
-    for b in seed.utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
-    return Color(hue: Double(h % 360) / 360, saturation: 0.45, brightness: 0.78)
-}
-
 // MARK: - 菜单栏图标：外圈 5 小时、内圈 7 天
 
 /// 正常时用模板图（系统自动适配深浅色菜单栏）；吃紧（alert=1）或告急（alert=2）时用彩色，并在外圈加一层淡淡的光晕。
@@ -101,6 +94,7 @@ struct Meter: View {
     let title: String
     let value: Double?
     let reset: Date?
+    var idle = false          // 5 小时窗口还没开始计时
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
@@ -118,7 +112,7 @@ struct Meter: View {
                         .animation(.easeOut(duration: 0.7), value: value)
                 }
             }.frame(height: 5)
-            Text(value == nil ? "暂无数据" : resetText(reset))
+            Text(value == nil ? "暂无数据" : (idle ? "未开始计时" : resetText(reset)))
                 .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
         }
         .frame(maxWidth: .infinity)
@@ -139,6 +133,7 @@ struct Tag: View {
 struct AccountCard: View {
     @ObservedObject var model: Model
     let account: Account
+    var recommended = false
     var st: AccountState { model.states[account.id] ?? AccountState() }
     var isActive: Bool { st.live }
 
@@ -147,10 +142,7 @@ struct AccountCard: View {
         let name = model.shortDisplayName(account)
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                ZStack {
-                    Circle().fill(avatarColor(st.email.isEmpty ? full : st.email))
-                    Text(String(name.prefix(1)).uppercased()).font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                }.frame(width: 30, height: 30)
+                Avatar(model: model, account: account)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
                         Text(name).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle).help(full)
@@ -162,6 +154,7 @@ struct AccountCard: View {
                     HStack(spacing: 5) {
                         if isActive { Tag(text: "使用中", tint: .green) }
                         if !st.plan.isEmpty { Tag(text: st.plan) }
+                        if recommended { Tag(text: "推荐", tint: .accentColor) }
                     }
                 }
                 Spacer(minLength: 4)
@@ -170,14 +163,14 @@ struct AccountCard: View {
                         Label("切换", systemImage: "arrow.left.arrow.right")
                     }
                     .buttonStyle(.borderedProminent).controlSize(.small).disabled(model.switching)
-                    .help("把 Claude Code 的登录换成这个账号（新开的和正在运行的 claude 都会用它）")
+                    .help("把 Claude Code 的登录换成这个账号（新开的和正在运行的普通 claude 都会用它）")
                 }
                 if st.loggedIn {
-                    Button { model.openTerminal(account) } label: {
+                    Button { TerminalController.shared.open(model, account: account) } label: {
                         Label("终端", systemImage: "terminal")
                     }
                     .buttonStyle(.bordered).controlSize(.small)
-                    .help("用这个账号独立打开终端并启动 claude，不影响别的账号")
+                    .help("选目录和参数，用这个账号开终端")
                 } else {
                     Button { model.relogin(account) } label: { Label("重新登录", systemImage: "person.badge.key") }
                         .buttonStyle(.bordered).controlSize(.small)
@@ -185,7 +178,7 @@ struct AccountCard: View {
             }
             if st.loggedIn {
                 HStack(alignment: .top, spacing: 14) {
-                    Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset)
+                    Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset, idle: st.fiveIdle)
                     Meter(title: "7 天", value: st.sevenDay, reset: st.sevenReset)
                 }
             } else {
@@ -204,10 +197,7 @@ struct AccountCard: View {
         )
         .alertGlow(st.level, corner: 12, radius: 9)
         .animation(.spring(response: 0.45, dampingFraction: 0.8), value: isActive)
-        .contextMenu {
-            Button("修改显示名称…") { AccountEditor.shared.open(model, account: account) }
-            if !isActive { Button("从列表移除（不删登录）") { model.removeFromList(account) } }
-        }
+        .contextMenu { AccountMenu(model: model, account: account) }
     }
 }
 
@@ -225,7 +215,6 @@ struct MenuView: View {
     @ObservedObject var model: Model
     @State private var showAdd = false
     @State private var newLabel = ""
-    @State private var loginOn = LoginItem.enabled
     @State private var shown = true          // 弹出动效：false → true 时整个面板弹出、卡片依次浮现
 
     /// 每次打开面板就重播一遍弹出动效
@@ -246,13 +235,6 @@ struct MenuView: View {
                 Text("CCBaton").font(.system(size: 15, weight: .bold))
                 Spacer()
                 Text(agoText(newest)).font(.caption2).foregroundStyle(.tertiary)
-                Button { model.setAlerts(!model.alertsOn) } label: {
-                    Image(systemName: model.alertsOn ? "bell.fill" : "bell.slash").frame(width: 16, height: 16)
-                        .foregroundStyle(model.alertsOn ? Color.accentColor : Color.secondary)
-                }
-                .buttonStyle(.borderless)
-                .help(model.alertsOn ? "额度告急提醒：已开（点一下关闭；右键可发一条测试提醒）" : "额度告急提醒：已关（点一下打开）")
-                .contextMenu { Button("发送一条测试提醒") { model.sendTestAlert() } }
                 Button {
                     Task { model.reloadStates(); await model.refreshAll(force: true) }
                 } label: {
@@ -262,47 +244,44 @@ struct MenuView: View {
                 .buttonStyle(.borderless).disabled(model.refreshing).help("刷新所有账号的额度")
             }
 
-            if let hint = model.switchHint {
-                Label(hint, systemImage: "arrow.triangle.swap")
-                    .font(.caption).foregroundStyle(.orange)
-                    .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
+            if let advice = model.switchAdvice {
+                HStack(spacing: 8) {
+                    Label(advice.text, systemImage: "arrow.triangle.swap")
+                        .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    if let t = advice.target {
+                        Button("切换") { model.switchTo(t) }
+                            .buttonStyle(.borderedProminent).controlSize(.small).disabled(model.switching)
+                            .help("切换到「\(model.shortDisplayName(t))」")
+                    }
+                }
+                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
             }
 
-            ForEach(Array(model.store.accounts.enumerated()), id: \.element.id) { i, a in
-                AccountCard(model: model, account: a)
-                    .opacity(shown ? 1 : 0)
-                    .offset(y: shown ? 0 : 14)
-                    .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.04 * Double(i + 1)), value: shown)
-            }
+            AccountList(model: model, shown: shown)
 
             if let n = model.notice {
                 Text(n).font(.caption).foregroundStyle(.secondary)
             }
 
+            if model.warmupOn {
+                Button { SettingsController.shared.open(model) } label: {
+                    Label("预热：" + model.warmupStatus, systemImage: "timer")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain).help("点一下打开设置")
+            }
+
             Divider().opacity(0.5)
             HStack(spacing: 14) {
                 FooterButton(title: "添加账号", icon: "plus.circle") { showAdd = true }
-                if !Model.demo, FileManager.default.fileExists(atPath: home + "/.cc-switch/claude_accounts.json") {
-                    FooterButton(title: "导入 cc-switch", icon: "square.and.arrow.down") { model.importCCSwitch() }
-                }
+                FooterButton(title: "设置", icon: "gearshape") { SettingsController.shared.open(model) }
+                    .help("开机启动、额度预热、提醒、小组件")
                 Spacer()
-                FooterButton(title: model.store.widgetVisible == true ? "隐藏小组件" : "显示小组件", icon: "rectangle.on.rectangle") {
-                    WidgetController.shared.toggle(model)
-                }
+                VersionTag(model: model)
                 FooterButton(title: "退出", icon: "power") { NSApp.terminate(nil) }
-            }
-            HStack {
-                FooterButton(title: (model.store.workDir as NSString).abbreviatingWithTildeInPath, icon: "folder") { model.chooseWorkDir() }
-                    .lineLimit(1).truncationMode(.middle).help("打开终端时进入的目录，点击修改")
-                Spacer(minLength: 8)
-                FooterButton(title: loginOn ? "开机启动：开" : "开机启动：关", icon: loginOn ? "power.circle.fill" : "power.circle") {
-                    do { try LoginItem.set(!loginOn); model.notice = LoginItem.needsApproval ? "需要在系统设置 → 通用 → 登录项 里允许 CCBaton" : nil }
-                    catch { model.notice = "开机启动设置失败：\(error.localizedDescription)" }
-                    loginOn = LoginItem.enabled
-                }
-                .help(Bundle.main.bundlePath.hasPrefix("/Volumes/") ? "注意：应用放在外接盘上，开机时盘没挂载好会启动失败，建议放进\"应用程序\"文件夹再开启" : "登录 Mac 时自动启动 CCBaton")
-                Text("v\(appVersion)").font(.caption2).foregroundStyle(.tertiary).help("CCBaton \(appVersion)（构建 \(appBuild)）")
             }
         }
         .padding(14)
@@ -310,10 +289,11 @@ struct MenuView: View {
         .scaleEffect(shown ? 1 : 0.95, anchor: .top)
         .opacity(shown ? 1 : 0)
         .animation(.spring(response: 0.34, dampingFraction: 0.8), value: shown)
-        .onAppear { loginOn = LoginItem.enabled; if !Model.readOnly { model.notice = nil; model.reloadStates() }; replay() }
+        .onAppear { if !Model.readOnly { model.notice = nil; model.reloadStates() }; replay() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { n in
-            // 点菜单栏图标弹出面板时，面板窗口会成为 key 窗口：重播弹出动效（小组件和编辑窗口不算）
-            guard let w = n.object as? NSWindow, w !== WidgetController.shared.panel, w !== AccountEditor.shared.window else { return }
+            // 点菜单栏图标弹出面板时，面板窗口会成为 key 窗口：重播弹出动效（小组件和本程序的其他窗口不算）
+            let others = [WidgetController.shared.panel, AccountEditor.shared.window, SettingsController.shared.window, TerminalController.shared.window]
+            guard let w = n.object as? NSWindow, !others.contains(where: { $0 === w }), w.sheetParent == nil else { return }
             model.notice = nil; model.reloadStates(); replay()
         }
         .alert("添加 Claude 账号", isPresented: $showAdd) {
@@ -328,12 +308,34 @@ struct MenuView: View {
 
 // MARK: - 离屏截图（不需要屏幕录制权限），用来检查界面
 
+/// 截图用的窗口：当成当前活动窗口来画，主按钮才是实际使用时的蓝色
+private final class ShotWindow: NSWindow {
+    override var isKeyWindow: Bool { true }
+    override var isMainWindow: Bool { true }
+}
+
+/// 控件进窗口后可能比量出来的矮一两个点，边上会留一条透明缝：裁掉
+private func trimClearEdges(_ rep: NSBitmapImageRep, scale: CGFloat) -> NSBitmapImageRep {
+    let w = rep.pixelsWide, h = rep.pixelsHigh
+    func clear(_ x: Int, _ y: Int) -> Bool { (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) < 0.5 }
+    var top = 0, bottom = h, left = 0, right = w
+    while top < bottom && clear(w / 2, top) { top += 1 }
+    while bottom > top && clear(w / 2, bottom - 1) { bottom -= 1 }
+    while left < right && clear(left, h / 2) { left += 1 }
+    while right > left && clear(right - 1, h / 2) { right -= 1 }
+    guard right > left, bottom > top,
+          let cut = rep.cgImage?.cropping(to: CGRect(x: left, y: top, width: right - left, height: bottom - top)) else { return rep }
+    let out = NSBitmapImageRep(cgImage: cut)
+    out.size = NSSize(width: CGFloat(cut.width) / scale, height: CGFloat(cut.height) / scale)
+    return out
+}
+
 @MainActor
 func renderPNG<V: View>(_ view: V, dark: Bool, scale: CGFloat = 2, path: String) {
-    let host = NSHostingView(rootView: view)
+    let host = NSHostingView(rootView: view.environment(\.controlActiveState, .key))
     let size = host.fittingSize
     host.frame = NSRect(origin: .zero, size: size)
-    let win = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    let win = ShotWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
     win.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
     win.contentView = host
     host.layoutSubtreeIfNeeded()
@@ -343,7 +345,28 @@ func renderPNG<V: View>(_ view: V, dark: Bool, scale: CGFloat = 2, path: String)
                                      colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
     rep.size = size
     host.cacheDisplay(in: host.bounds, to: rep)
-    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    try? trimClearEdges(rep, scale: scale).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+}
+
+/// 把系统警告框画成图片（离屏时它的毛玻璃底是透明的，垫一层窗口底色）
+@MainActor
+func renderAlert(_ alert: NSAlert, scale: CGFloat = 2, path: String) {
+    alert.layout()
+    let window = alert.window
+    window.appearance = NSAppearance(named: .darkAqua)
+    guard let content = window.contentView else { return }
+    content.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+    guard let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
+    content.cacheDisplay(in: content.bounds, to: rep)
+    let image = NSImage(size: content.bounds.size)
+    image.addRepresentation(rep)
+    renderPNG(Image(nsImage: image)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28)
+        .background(LinearGradient(colors: [Color(red: 0.16, green: 0.28, blue: 0.50), Color(red: 0.42, green: 0.26, blue: 0.52)], startPoint: .topLeading, endPoint: .bottomTrailing)),
+        dark: true, scale: scale, path: path)
 }
 
 /// README 用的演示数据：虚构的账号、邮箱和用量，不含任何真实信息
@@ -362,6 +385,14 @@ func applyDemo(_ model: Model, live five: Double = 42, liveSeven: Double = 61, s
                             Account(id: "d2", label: "个人", configDir: "/demo/2"),
                             Account(id: "d3", label: "备用", configDir: "/demo/3")]
     model.store.workDir = home + "/Projects/my-app"
+    model.store.warmupEnabled = false
+    model.store.warmupRecords = nil
+    model.store.autoUpdateCheck = true
+    model.store.updateRelease = nil
+    model.store.updateCheckedAt = Date().addingTimeInterval(-3600)
+    model.updatePhase = .idle
+    model.store.recentDirs = ["my-app", "website", "scripts", "notes"].map { home + "/Projects/" + $0 }
+    model.store.terminalPrefs = ["d2": TerminalPrefs(dir: home + "/Projects/website", skipPermissions: false, args: "--continue")]
     model.states = [
         "d1": st("alex.work@example.com", "Max", live: true, five, liveSeven, 2 * 3600 + 35 * 60, 2 * 86400 + 5 * 3600),
         "d2": st("alex@example.com", "Pro", live: false, second, 23, 3 * 3600 + 10 * 60, 4 * 86400 + 17 * 3600),
@@ -369,7 +400,29 @@ func applyDemo(_ model: Model, live five: Double = 42, liveSeven: Double = 61, s
     ]
 }
 
-/// README 截图：面板、小组件三个尺寸、告警状态、编辑窗口、菜单栏图标。全部用演示数据。
+/// 多账号的演示数据：第一个在用，有一个吃紧、一个周额度用完、（够多时）一个登录失效
+@MainActor
+func applyManyDemo(_ model: Model, count: Int) {
+    applyDemo(model)
+    let names = ["工作", "个人", "备用", "团队", "客户项目", "实验", "副号", "夜间任务", "测试", "临时", "课程", "归档"]
+    let five: [Double] = [42, 8, 0, 85, 27, 63, 12, 96, 5, 33, 55, 18]
+    let seven: [Double] = [61, 23, 12, 44, 100, 31, 8, 72, 19, 50, 66, 4]
+    model.store.accounts = (0..<count).map { i in
+        Account(id: "d\(i + 1)", label: names[i % names.count] + (i < names.count ? "" : "\(i + 1)"), configDir: "/demo/\(i + 1)")
+    }
+    var states: [String: AccountState] = [:]
+    for (i, a) in model.store.accounts.enumerated() {
+        var s = AccountState()
+        s.live = i == 0; s.loggedIn = i != 5; s.email = "alex\(i + 1)@example.com"; s.plan = i == 0 ? "Max" : "Pro"; s.orgName = s.email
+        s.fiveHour = five[i % five.count]; s.sevenDay = seven[i % seven.count]
+        s.fiveReset = Date().addingTimeInterval(Double(3600 + i * 900)); s.sevenReset = Date().addingTimeInterval(Double(86400 * 2 + i * 7200))
+        s.fetchedAt = Date().addingTimeInterval(-20)
+        states[a.id] = s
+    }
+    model.states = states
+}
+
+/// README 截图：总览、面板、设置、终端、小组件三个尺寸、告警状态、编辑窗口、菜单栏图标。全部用演示数据。
 @MainActor
 func renderReadmeShots(to dir: String) {
     _ = NSApplication.shared
@@ -391,8 +444,35 @@ func renderReadmeShots(to dir: String) {
             .padding(30)
             .background(dark ? wall : wallLight)
     }
+    // 主界面把提醒都摆出来：使用中的账号 96%（红）、另一个 85%（橙）、顶部换号建议；
+    // 预热开着，第三个账号还没开始计时，底部是预热状态
+    func applyShowcase() {
+        applyDemo(model, live: 96, liveSeven: 61, second: 85)
+        model.states["d3"]?.fiveReset = nil
+        model.states["d3"]?.fiveIdle = true
+        model.states["d2"]?.fiveReset = Date().addingTimeInterval(4 * 3600 + 30 * 60)
+        model.store.warmupEnabled = true     // 只改内存里的，不保存
+        model.store.warmupStagger = true
+    }
+    applyShowcase()
     renderPNG(popover(dark: true), dark: true, path: dir + "/panel-dark.png")
     renderPNG(popover(dark: false), dark: false, path: dir + "/panel-light.png")
+
+    // 设置窗口
+    model.store.widgetVisible = true         // 只改内存里的，不保存
+    model.store.widgetSize = "medium"
+    model.store.alertsEnabled = true
+    func settings(dark: Bool) -> some View {
+        SettingsView(model: model).background(Color(nsColor: .windowBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(dark ? wall : wallLight)
+    }
+    renderPNG(settings(dark: true), dark: true, path: dir + "/settings.png")
+    applyDemo(model)
+
+    renderPNG(TerminalLaunchView(model: model, account: model.store.accounts[1], close: {}).background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(wall),
+        dark: true, path: dir + "/terminal.png")
 
     for s in WidgetSize.allCases {
         model.store.widgetSize = s.rawValue
@@ -401,20 +481,40 @@ func renderReadmeShots(to dir: String) {
     model.store.widgetSize = "medium"
     renderPNG(WidgetView(model: model).padding(16).background(wallLight), dark: false, path: dir + "/widget-medium-light.png")
 
-    let live = model.store.accounts[0]
-    renderPNG(EditView(model: model, account: live, close: {}).background(Color(nsColor: .windowBackgroundColor))
+    let other = model.store.accounts[1]
+    renderPNG(EditView(model: model, account: other, close: {}).background(Color(nsColor: .windowBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(wall),
         dark: true, path: dir + "/editor.png")
 
+    // 移除账号的确认框（演示一个用"添加账号"加的号，会删登录的那种）
+    model.store.accounts[1].configDir = supportDir + "/accounts/demo/config"
+    renderAlert(removalAlert(model.removalPrompt(model.store.accounts[1], terminals: [])), path: dir + "/remove.png")
+
+    // 迁移：设置里的入口和确认框（演示账号放在 cc-switch 目录里，当作装着它）
+    model.ccSwitchInstalled = { true }
+    applyDemo(model)
+    for i in model.store.accounts.indices { model.store.accounts[i].configDir = ccSwitchRoot + "/claude-accounts/demo\(i)/config" }
+    model.store.warmupEnabled = false; model.store.widgetVisible = true; model.store.widgetSize = "medium"
+    renderPNG(settings(dark: true), dark: true, path: dir + "/settings-migrate.png")
+    renderAlert(removalAlert(model.migrationPrompt, destructive: false), path: dir + "/migrate.png")
+
+    // 软件更新：面板右下角的红点，和设置里发现新版时的样子
+    applyDemo(model)
+    model.store.updateRelease = AppRelease(version: "1.4.0", page: releasesPageURL, zip: releasesPageURL, signature: releasesPageURL)
+    renderPNG(popover(dark: true), dark: true, path: dir + "/panel-update.png")
+    renderPNG(UpdateSettings(model: model).padding(20).frame(width: 420).background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(wall),
+        dark: true, path: dir + "/update.png")
+
     // 告警：使用中的账号 96%（红），另一个 85%（橙）
     applyDemo(model, live: 96, liveSeven: 61, second: 85)
-    renderPNG(popover(dark: true), dark: true, path: dir + "/alert-panel.png")
     renderPNG(WidgetView(model: model).padding(16).background(wall), dark: true, path: dir + "/alert-widget.png")
     model.store.widgetSize = "small"
     renderPNG(WidgetView(model: model).padding(16).background(wall), dark: true, path: dir + "/alert-widget-small.png")
 
     // 总览大图：面板 + 中号小组件 + 大号小组件，摆在同一块壁纸上
-    applyDemo(model)
+    applyShowcase()
+    model.store.widgetSize = "medium"
     struct Hero: View {
         @ObservedObject var model: Model
         let wall: LinearGradient
@@ -435,6 +535,32 @@ func renderReadmeShots(to dir: String) {
         }
     }
     renderPNG(Hero(model: model, wall: wall), dark: true, path: dir + "/hero.png")
+
+    // 账号多时：面板换成紧凑布局（让使用中的快用完，带出换号建议和"推荐"）
+    applyManyDemo(model, count: 8)
+    model.states["d1"]?.fiveHour = 96
+    renderPNG(popover(dark: true), dark: true, path: dir + "/panel-many.png")
+    // 拖动排序：把第 5 个往上拖，蓝线是松手后的位置
+    applyManyDemo(model, count: 7)
+    AccountList.shotDrag = AccountDrag(id: "d5", offset: -86)
+    renderPNG(popover(dark: true), dark: true, path: dir + "/panel-reorder.png")
+    AccountList.shotDrag = nil
+    // 小组件
+    applyManyDemo(model, count: 8)
+    struct Many: View {
+        @ObservedObject var model: Model
+        let wall: LinearGradient
+        var body: some View {
+            HStack(alignment: .top, spacing: 8) {
+                // 小组件会撑满给它的空间，这里按系统格子给定大小
+                ForEach(WidgetSize.allCases, id: \.self) { s in
+                    WidgetView(model: model, forceSize: s).frame(width: s.width, height: s.height)
+                }
+            }
+            .padding(16).background(wall)
+        }
+    }
+    renderPNG(Many(model: model, wall: wall), dark: true, path: dir + "/widget-many.png")
 
     // 菜单栏图标：正常 / 吃紧 / 告急
     struct Strip: View {
@@ -479,6 +605,16 @@ func renderSnapshots(to dir: String) {
         png(EditView(model: model, account: first, close: {}).background(Color(nsColor: .windowBackgroundColor)), dark: true, file: "editor-dark.png")
         png(EditView(model: model, account: first, close: {}).background(Color(nsColor: .windowBackgroundColor)), dark: false, file: "editor-light.png")
     }
+    for (i, a) in model.store.accounts.prefix(2).enumerated() {      // 打开终端的窗口：在用和没在用的说明不一样
+        png(TerminalLaunchView(model: model, account: a, close: {}).background(Color(nsColor: .windowBackgroundColor)), dark: i == 0, file: "terminal-\(i).png")
+    }
+    // 设置窗口（按实际设置）和"预热开着"时的面板
+    png(SettingsView(model: model).background(Color(nsColor: .windowBackgroundColor)), dark: true, file: "settings-dark.png")
+    png(SettingsView(model: model).background(Color(nsColor: .windowBackgroundColor)), dark: false, file: "settings-light.png")
+    let savedWarmup = model.store.warmupEnabled
+    model.store.warmupEnabled = true         // 只改内存里的，不保存
+    png(MenuView(model: model).background(Color(nsColor: .windowBackgroundColor)), dark: true, file: "panel-warmup-dark.png")
+    model.store.warmupEnabled = savedWarmup
     for s in WidgetSize.allCases {
         model.store.widgetSize = s.rawValue      // 只改内存里的，不保存
         png(WidgetView(model: model).padding(14).background(LinearGradient(colors: [Color(red: 0.2, green: 0.3, blue: 0.5), Color(red: 0.5, green: 0.3, blue: 0.5)], startPoint: .topLeading, endPoint: .bottomTrailing)), dark: true, file: "widget-\(s.rawValue)-dark.png")
@@ -528,6 +664,10 @@ struct ClaudeAccountBarApp: App {
     @StateObject private var model = Model()
     init() {
         let args = CommandLine.arguments
+        // 启动脚本用它核对独立终端登录的是不是所选账号：0 是，1 不是
+        if let i = args.firstIndex(of: "--check-terminal-login") {
+            exit(i + 2 < args.count && terminalLoginMatches(dir: args[i + 1], key: args[i + 2]) ? 0 : 1)
+        }
         if let i = args.firstIndex(of: "--login-item") { exit(LoginItem.runCLI(i + 1 < args.count ? args[i + 1] : "status")) }
         if args.contains("--version") { print("CCBaton \(appVersion) (构建 \(appBuild))"); exit(0) }
         // 截图、预检、查看状态只读：绝不把设置写回文件（导入 --import 和 --widgettest 例外，后者只在沙盒里跑）
@@ -542,7 +682,19 @@ struct ClaudeAccountBarApp: App {
             MainActor.assumeIsolated { renderSnapshots(to: dir) }
             exit(0)
         }
+        if args.contains("--idle-for-test"), testRoot != nil { Thread.sleep(forTimeInterval: 4); exit(0) }
+        if args.contains("--finish-update-for-test"), testRoot != nil {      // 更新测试里"打开新版"走到这
+            MainActor.assumeIsolated { Model.readOnly = true; let m = Model(); Model.readOnly = false; m.finishPendingUpdate() }
+            exit(0)
+        }
+        // 只读：真的去问一次 GitHub，打印结果（不下载、不安装、不写设置）
+        if args.contains("--check-update") { exit(runUpdateCheckCLI()) }
         if args.contains("--selftest") { exit(runSelfTest()) }
+        if args.contains("--warmuptest") { exit(MainActor.assumeIsolated { runWarmupTest() }) }
+        if args.contains("--terminaltest") { exit(MainActor.assumeIsolated { runTerminalTest() }) }
+        if args.contains("--multitest") { exit(MainActor.assumeIsolated { runMultiTest() }) }
+        if args.contains("--migratetest") { exit(MainActor.assumeIsolated { runMigrationTest() }) }
+        if args.contains("--updatetest") { exit(MainActor.assumeIsolated { runUpdateTest() }) }
         if args.contains("--renametest") {
             guard testRoot != nil else { print("必须设置 CAB_TEST_ROOT"); exit(2) }
             var failed = 0

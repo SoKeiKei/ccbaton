@@ -4,6 +4,7 @@ import AppKit
 // 自动驾驶测试：让真实运行的程序自己去点菜单栏图标、切换小组件尺寸、显示/隐藏小组件、刷新数据，
 // 用来复现"点着点着就崩"这类只有真实窗口和动画一起跑才会出现的问题。
 // 只在沙盒里跑：必须同时设置 CAB_TEST_ROOT 和 CAB_DRIVE=1。
+// 再加 CAB_DRIVE_DRAG=1：只在面板里拖动账号，验证拖动排序。
 
 @MainActor
 enum Driver {
@@ -20,7 +21,49 @@ enum Driver {
         return nil
     }
 
+    /// 有的系统版本里程序点不开自己的菜单栏弹窗（macOS 27 就是），
+    /// 用一个同样不抢焦点、大小跟着内容变的面板顶替，里面放的是同一个面板视图
+    static func standInPanel(_ model: Model) -> NSPanel {
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 400), styleMask: [.titled, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.title = "面板替身（测试用）"
+        p.contentViewController = NSHostingController(rootView: MenuView(model: model))
+        p.level = .floating
+        p.isReleasedWhenClosed = false
+        p.setFrameTopLeftPoint(NSPoint(x: 80, y: (NSScreen.main?.visibleFrame.maxY ?? 900) - 20))
+        return p
+    }
+
+    /// 在面板里按住账号拖动，看顺序有没有变
+    static func dragInPopup(_ model: Model) {
+        Model.readOnly = true               // 保住演示数据（面板打开时不去重读真实状态）
+        applyManyDemo(model, count: 8)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            statusButton()?.performClick(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                let real = NSApp.windows.first { $0.isVisible && String(describing: type(of: $0)).contains("MenuBarExtra") }
+                let stand = real == nil ? standInPanel(model) : nil
+                stand?.makeKeyAndOrderFront(nil)
+                let w: NSWindow = real ?? stand!
+                print(real == nil ? "菜单栏弹窗点不开，用替身面板测" : "用真的菜单栏弹窗测")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    var failed = 0
+                    for (from, to) in [(4, 1), (1, 5), (0, 2)] {
+                        let before = model.store.accounts.map { $0.id }
+                        let sent = performDrag(in: w, from: before[from], to: before[to])
+                        let after = model.store.accounts.map { $0.id }
+                        let ok = sent && after == moved(before, from: from, to: to)
+                        if !ok { failed += 1 }
+                        print("\(ok ? "通过" : "失败")  把第 \(from + 1) 个拖到第 \(to + 1) 个：\(after.joined(separator: " "))，面板还开着：\(w.isVisible)")
+                    }
+                    fflush(stdout)
+                    exit(failed == 0 ? 0 : 1)
+                }
+            }
+        }
+    }
+
     static func start(_ model: Model, seconds: Double) {
+        if ProcessInfo.processInfo.environment["CAB_DRIVE_DRAG"] == "1" { dragInPopup(model); return }
         applyDemo(model)
         // 对照实验：CAB_DRIVE_SAFEPOS=1 时把小组件放在主屏幕中间（左上角 x=300），不会伸出屏幕边缘
         if ProcessInfo.processInfo.environment["CAB_DRIVE_SAFEPOS"] == "1" {
@@ -39,14 +82,20 @@ enum Driver {
         }
         let sizes: [WidgetSize] = [.large, .small, .medium, .large, .medium, .small]
         var step = 0
-        var clicks = 0, resizes = 0, toggles = 0
-        // 排除法：CAB_DRIVE_SKIP=click,resize,toggle,data 可以关掉某类操作，看哪一类是崩溃的必要条件
+        var clicks = 0, resizes = 0, toggles = 0, settings = 0
+        var recounts = 0
+        let panel = standInPanel(model)       // 面板随账号数换布局、改大小
+        let counts = [6, 12, 2, 9, 5, 1, 8, 4, 3]
+        // 排除法：CAB_DRIVE_SKIP=click,resize,toggle,data,settings,count 可以关掉某类操作，看哪一类是崩溃的必要条件
         let skip = Set((ProcessInfo.processInfo.environment["CAB_DRIVE_SKIP"] ?? "").split(separator: ",").map(String.init))
         let secs = Double(ProcessInfo.processInfo.environment["CAB_DRIVE_SECONDS"] ?? "") ?? seconds
         // 每 0.4 秒做一件事，几种操作轮流来，节奏有快有慢
         Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
             Task { @MainActor in
                 step += 1
+                if !skip.contains("count"), step % 4 == 0 {      // 账号增减：面板换布局、小组件重排
+                    applyManyDemo(model, count: counts[recounts % counts.count]); recounts += 1
+                }
                 if !skip.contains("data") {
                     model.states["d1"]?.fiveHour = Double((step * 7) % 100)
                     model.states["d2"]?.sevenDay = Double((step * 13) % 100)
@@ -57,16 +106,28 @@ enum Driver {
                     print("[\(step)] \(t)    ← 窗口 \(f.map { "\(Int($0.width))×\(Int($0.height))" } ?? "无")，设置 \(model.store.widgetSize ?? "默认")，内容量出来 \(Int(d.width))×\(Int(d.height))"); fflush(stdout)
                 }
                 switch step % 9 {
-                case 0, 4: if !skip.contains("click") { log("点菜单栏图标（弹出/收起面板）"); statusButton()?.performClick(nil); clicks += 1 }
+                case 0, 4: if !skip.contains("click") {
+                    log("点菜单栏图标，开关面板替身（\(model.store.accounts.count) 个账号）"); statusButton()?.performClick(nil); clicks += 1
+                    if panel.isVisible && step % 8 == 0 { panel.orderOut(nil) } else { panel.orderFrontRegardless() }
+                }
                 case 1, 5, 7: if !skip.contains("resize") { let t = sizes[step % sizes.count]; log("小组件换尺寸 → \(t.title)"); WidgetController.shared.changeSize(model, to: t); resizes += 1 }
                 case 3: if !skip.contains("toggle") { log("显示/隐藏小组件（现在\(WidgetController.shared.isVisible ? "可见" : "隐藏")）"); WidgetController.shared.toggle(model); toggles += 1 }
                 case 6: if !skip.contains("toggle"), !WidgetController.shared.isVisible { log("补开小组件"); WidgetController.shared.show(model) }
+                case 2: if !skip.contains("settings") {
+                    if let w = SettingsController.shared.window, w.isVisible { log("关设置窗口"); w.close() }
+                    else { log("开设置窗口"); SettingsController.shared.open(model); settings += 1 }
+                }
+                case 8: if !skip.contains("settings") {
+                    log("改预热开关（只改内存），开关打开终端窗口"); model.store.warmupEnabled = !(model.store.warmupEnabled ?? false)
+                    if let w = TerminalController.shared.window, w.isVisible { w.close() }
+                    else { TerminalController.shared.open(model, account: model.store.accounts[step % model.store.accounts.count]) }
+                }
                 default: break
                 }
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + secs) {
-            print("自动驾驶测试完成：点图标 \(clicks) 次，换尺寸 \(resizes) 次，显示/隐藏小组件 \(toggles) 次，没有崩溃")
+            print("自动驾驶测试完成：点图标 \(clicks) 次，换尺寸 \(resizes) 次，显示/隐藏小组件 \(toggles) 次，开设置窗口 \(settings) 次，换账号数 \(recounts) 次，没有崩溃")
             fflush(stdout)
             exit(0)
         }

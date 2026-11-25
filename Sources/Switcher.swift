@@ -181,6 +181,12 @@ struct KeychainStore {
         else { r = try runSecurity(["add-generic-password", "-U", "-a", keychainAccount, "-s", svc, "-X", hex]) }
         if r.code != 0 { throw SwitchError("备份当前登录失败，没有切换") }
     }
+    func readBackup() -> Secret? {
+        let svc = servicePrefix == "Claude Code-credentials" ? "ClaudeAccountBar-backup" : "CABTEST-backup"
+        guard let r = try? runSecurity(["find-generic-password", "-a", keychainAccount, "-s", svc, "-w"]), r.code == 0 else { return nil }
+        let text = (String(data: r.out, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return parseSecret(Data(text.utf8)) ?? hexDecode(text).flatMap { parseSecret($0) }
+    }
     func deleteBackup() {
         let svc = servicePrefix == "Claude Code-credentials" ? "ClaudeAccountBar-backup" : "CABTEST-backup"
         _ = try? runSecurity(["delete-generic-password", "-a", keychainAccount, "-s", svc])
