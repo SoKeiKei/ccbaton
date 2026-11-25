@@ -180,6 +180,7 @@ struct WidgetView: View {
                 Circle().fill(Color.green).frame(width: 6, height: 6)
                 Text(a.map { model.shortDisplayName($0) } ?? "CCBaton").font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 0)
+                if let r = a.flatMap({ model.renewal($0) }) { renewalLabel(r) }
             }
             Spacer(minLength: 0)
             DualRing(five: st?.fiveHour, seven: st?.sevenDay)
@@ -194,13 +195,15 @@ struct WidgetView: View {
                             .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
                             .frame(width: 22, height: 22)
                             .background(Circle().fill(os.loggedIn ? model.avatarColor(of: o) : Color.gray.opacity(0.5)))
+                            .overlay(alignment: .topTrailing) { if model.renewal(o) != nil { renewalDot } }
                     }
-                    .buttonStyle(.plain).help("切换到 \(model.shortDisplayName(o))")
+                    .buttonStyle(.plain).help("切换到 \(model.shortDisplayName(o))" + (model.renewal(o).map { "（\($0.text)）" } ?? ""))
                 }
                 if !others.hidden.isEmpty {
                     Button { showMore(others.hidden) } label: {
                         Text("+\(others.hidden.count)").font(.system(size: 10, weight: .bold))
                             .frame(width: 22, height: 22).background(Circle().fill(Color.primary.opacity(0.16)))
+                            .overlay(alignment: .topTrailing) { if others.hidden.contains(where: { model.renewal($0) != nil }) { renewalDot } }
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain).help("其他账号")
@@ -210,18 +213,36 @@ struct WidgetView: View {
         .frame(maxHeight: .infinity)
     }
 
+    /// 名字下面那行：套餐或"使用中"；快续期时改说续期（在用的账号前面还有绿色对勾，认得出）。高度不变
+    func subtitle(_ a: Account, _ st: AccountState, size: CGFloat) -> some View {
+        let due = model.renewal(a)
+        return Text(due?.text ?? (st.live ? "使用中" : (st.plan.isEmpty ? " " : st.plan)))
+            .font(.system(size: size, weight: due != nil || st.live ? .semibold : .regular))
+            .foregroundStyle(due != nil ? Color.orange : (st.live ? Color.green : Color.secondary))
+            .lineLimit(1)
+    }
+
+    func renewalLabel(_ r: RenewalNotice) -> some View {
+        Text(r.text).font(.system(size: 9, weight: .semibold)).foregroundStyle(.orange).lineLimit(1).fixedSize()
+    }
+
+    var renewalDot: some View {
+        Circle().fill(Color.orange).frame(width: 8, height: 8).overlay(Circle().strokeBorder(Color.black.opacity(0.35), lineWidth: 0.8)).offset(x: 2, y: -2)
+    }
+
     func showMore(_ hidden: [Account]) {
         AccountPopup.present(AccountPopup.menu(model, accounts: hidden, onSwitch: onSwitch))
     }
 
     /// "还有 N 个"：点开菜单挑一个
     func moreButton(_ hidden: [Account], _ text: String) -> some View {
-        Button { showMore(hidden) } label: {
+        let due = hidden.contains { model.renewal($0) != nil }
+        return Button { showMore(hidden) } label: {
             HStack(spacing: 3) {
-                Text(text)
+                Text(due ? text + " · 有续期" : text).lineLimit(1)
                 Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
             }
-            .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+            .font(.system(size: 11, weight: .medium)).foregroundStyle(due ? Color.orange : Color.secondary)
             .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -234,9 +255,7 @@ struct WidgetView: View {
             SwitchBadge(live: st.live, usable: usable(st), size: badge) { onSwitch(a) }
             VStack(alignment: .leading, spacing: 1) {
                 Text(model.shortDisplayName(a)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Text(st.live ? "使用中" : (st.plan.isEmpty ? " " : st.plan))
-                    .font(.system(size: 9, weight: st.live ? .semibold : .regular))
-                    .foregroundStyle(st.live ? Color.green : Color.secondary)
+                subtitle(a, st, size: 9)
             }
             .frame(width: 70, alignment: .leading)
             if st.loggedIn {
@@ -291,8 +310,12 @@ struct WidgetView: View {
         return HStack(spacing: 7) {
             SwitchBadge(live: st.live, usable: usable(st), size: 24) { onSwitch(a) }
             VStack(alignment: .leading, spacing: 1) {
-                Text(model.shortDisplayName(a)).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                    .foregroundStyle(st.live ? Color.green : Color.primary)
+                HStack(spacing: 4) {
+                    Text(model.shortDisplayName(a)).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                        .foregroundStyle(st.live ? Color.green : Color.primary)
+                    Spacer(minLength: 0)
+                    if let r = model.renewal(a) { renewalLabel(r) }
+                }
                 if st.loggedIn {
                     HStack(spacing: 6) {
                         MiniMeter(title: "5时", value: st.fiveHour)
@@ -320,9 +343,7 @@ struct WidgetView: View {
                                 SwitchBadge(live: st.live, usable: usable(st), size: 28) { onSwitch(a) }
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(model.shortDisplayName(a)).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                                    Text(st.live ? "使用中" : (st.plan.isEmpty ? " " : st.plan))
-                                        .font(.system(size: 10, weight: st.live ? .semibold : .regular))
-                                        .foregroundStyle(st.live ? Color.green : Color.secondary)
+                                    subtitle(a, st, size: 10)
                                 }
                                 Spacer(minLength: 0)
                             }

@@ -124,7 +124,7 @@ struct AccountMenu: View {
     let account: Account
     var body: some View {
         let i = model.store.accounts.firstIndex { $0.id == account.id } ?? 0
-        Button("修改显示名称…") { AccountEditor.shared.open(model, account: account) }
+        Button("编辑账号…") { AccountEditor.shared.open(model, account: account) }
         Divider()
         Button("上移") { model.moveAccount(account.id, to: i - 1) }.disabled(i == 0)
         Button("下移") { model.moveAccount(account.id, to: i + 1) }.disabled(i >= model.store.accounts.count - 1)
@@ -188,8 +188,9 @@ struct AccountRow: View {
     var recommended = false
     var st: AccountState { model.states[account.id] ?? AccountState() }
 
-    /// 名字下面那行：一般是 5 小时的重置时间；周额度更紧时改说周额度
+    /// 名字下面那行：一般是 5 小时的重置时间；周额度更紧时改说周额度；快续期时改说续期
     private var detail: String {
+        if let r = model.renewal(account) { return r.text }
         if !st.loggedIn { return "需要重新登录" }
         if let w = st.sevenDay, w >= 80, w >= (st.fiveHour ?? 0) { return "周 " + resetText(st.sevenReset) }
         if st.fiveHour == nil { return "暂无数据" }
@@ -198,6 +199,7 @@ struct AccountRow: View {
 
     private var tip: String {
         var lines = [model.displayName(account) + (st.plan.isEmpty ? "" : "（\(st.plan)）")]
+        if let r = model.renewal(account) { lines.append("续期：\(monthDayText(r.date))") }
         if st.loggedIn {
             lines.append("5 小时：" + (st.fiveIdle ? "未开始计时" : resetText(st.fiveReset)))
             lines.append("7 天：" + resetText(st.sevenReset))
@@ -213,8 +215,8 @@ struct AccountRow: View {
                     Text(model.shortDisplayName(account)).font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle)
                     if recommended { Tag(text: "推荐", tint: .accentColor).fixedSize() }
                 }
-                Text(detail).font(.system(size: 9)).lineLimit(1).minimumScaleFactor(0.8)
-                    .foregroundStyle(st.loggedIn ? Color.secondary : Color.orange)
+                Text(detail).font(.system(size: 9, weight: model.renewal(account) == nil ? .regular : .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                    .foregroundStyle(st.loggedIn && model.renewal(account) == nil ? Color.secondary : Color.orange)
             }
             .frame(width: 86, alignment: .leading)
             .help(tip)
@@ -276,7 +278,8 @@ struct AccountList: View {
     private var estimatedHeight: CGFloat {
         let n = model.store.accounts.count
         let cards = compact ? (model.live == nil ? 0 : 1) : n
-        return CGFloat(cards) * 112 + CGFloat(n - cards) * accountRowHeight + CGFloat(max(n - 1, 0)) * spacing
+        let reminders = model.store.accounts.filter { model.renewal($0) != nil && (!compact || model.states[$0.id]?.live == true) }.count
+        return CGFloat(cards) * 112 + CGFloat(reminders) * 26 + CGFloat(n - cards) * accountRowHeight + CGFloat(max(n - 1, 0)) * spacing
     }
 
     private func target(for d: AccountDrag) -> (from: Int, to: Int)? {
@@ -381,7 +384,8 @@ enum AccountPopup {
             let s = model.states[a.id] ?? AccountState()
             func pct(_ v: Double?) -> String { v.map { "\(Int($0))%" } ?? "—" }
             let info = s.loggedIn ? "5 小时 \(pct(s.fiveHour)) · 7 天 \(pct(s.sevenDay))" : "需要重新登录"
-            let item = ActionMenuItem("\(model.shortDisplayName(a))　\(info)\(a.id == recommended ? "　推荐" : "")") { onSwitch(a) }
+            let due = model.renewal(a).map { "　\($0.text)" } ?? ""
+            let item = ActionMenuItem("\(model.shortDisplayName(a))　\(info)\(a.id == recommended ? "　推荐" : "")\(due)") { onSwitch(a) }
             item.isEnabled = s.loggedIn && !s.live
             menu.addItem(item)
         }

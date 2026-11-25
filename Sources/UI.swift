@@ -149,7 +149,7 @@ struct AccountCard: View {
                         Button { AccountEditor.shared.open(model, account: account) } label: {
                             Image(systemName: "pencil").font(.system(size: 10, weight: .semibold))
                         }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).help("修改显示名称")
+                        .buttonStyle(.plain).foregroundStyle(.secondary).help("编辑账号：名称、续期日、备注")
                     }
                     HStack(spacing: 5) {
                         if isActive { Tag(text: "使用中", tint: .green) }
@@ -184,6 +184,11 @@ struct AccountCard: View {
             } else {
                 Label("登录已失效或还没登录，点右上角「重新登录」，授权完成后点刷新", systemImage: "exclamationmark.circle")
                     .font(.caption).foregroundStyle(.orange)
+            }
+            if let r = model.renewal(account) {
+                Label("\(r.text) · \(monthDayText(r.date))", systemImage: "calendar.badge.exclamationmark")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(12)
@@ -453,6 +458,7 @@ func renderReadmeShots(to dir: String) {
         model.states["d2"]?.fiveReset = Date().addingTimeInterval(4 * 3600 + 30 * 60)
         model.store.warmupEnabled = true     // 只改内存里的，不保存
         model.store.warmupStagger = true
+        model.store.accounts[1].renewalDay = Calendar.current.component(.day, from: Date().addingTimeInterval(2 * 86400))    // "后天续期"
     }
     applyShowcase()
     renderPNG(popover(dark: true), dark: true, path: dir + "/panel-dark.png")
@@ -481,6 +487,8 @@ func renderReadmeShots(to dir: String) {
     model.store.widgetSize = "medium"
     renderPNG(WidgetView(model: model).padding(16).background(wallLight), dark: false, path: dir + "/widget-medium-light.png")
 
+    model.store.accounts[1].renewalDay = Calendar.current.component(.day, from: Date().addingTimeInterval(2 * 86400))
+    model.store.accounts[1].note = "公司报销用，发票每月续期后记得下载。\n登录邮箱的二次验证在手机上。"
     let other = model.store.accounts[1]
     renderPNG(EditView(model: model, account: other, close: {}).background(Color(nsColor: .windowBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(wall),
@@ -724,7 +732,7 @@ struct ClaudeAccountBarApp: App {
                 check("留空恢复显示邮箱", m.displayName(m.store.accounts[0]) == "real@test.com")
                 AccountEditor.shared.open(m, account: m.store.accounts[0])
                 let w = AccountEditor.shared.window
-                check("编辑窗口打开了，标题和宽度正确", w?.isVisible == true && w?.title == "修改账号名称" && abs((w?.contentView?.frame.width ?? 0) - 400) < 1)
+                check("编辑窗口打开了，标题和宽度正确", w?.isVisible == true && w?.title == "编辑账号" && abs((w?.contentView?.frame.width ?? 0) - 400) < 1)
                 w?.close()
             }
             print(failed == 0 ? "\n全部通过" : "\n有 \(failed) 项失败")

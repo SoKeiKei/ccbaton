@@ -6,7 +6,7 @@
 
 *English: CCBaton is a native macOS menu-bar app and desktop widget for people who use several Claude Code subscriptions. It shows each account's 5-hour / 7-day quota, switches the account Claude Code is signed in with in one click, opens a terminal per account with a directory picker and launch options (shielded from third-party API settings; optional full isolation from account switching), warns you before a quota runs out, updates itself in one click from signed GitHub releases, and can optionally (off by default) start idle accounts' 5-hour windows early, staggered so they reset at different times. Swift, no dependencies, MIT licensed. Unofficial — not affiliated with Anthropic.*
 
-> 当前版本 **1.3.0**　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)　·　macOS 14 或更高
+> 当前版本 **1.3.1**　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)　·　macOS 14 或更高
 
 <p align="center"><img src="docs/screenshots/hero.png" width="860" alt="CCBaton 总览：菜单栏面板带换号建议、额度告警和预热状态，右边是中号和大号桌面小组件"></p>
 
@@ -25,10 +25,13 @@
 | [额度预热](#额度预热) | 账号空闲时自动让 5 小时倒计时先走起来，并错开各账号的重置时间（默认关） |
 | [桌面小组件](#桌面小组件) | 三种尺寸，对齐系统小组件，账号前面直接有切换按钮 |
 | [账号再多也放得下](#账号多的时候) | 面板自动换紧凑布局，小组件大小不变；顺序由你拖动决定 |
-| [账号管理](#账号管理) | 添加账号、改显示名称、彻底移除账号 |
+| [账号管理](#账号管理) | 添加账号、改显示名称、写备注、彻底移除账号 |
+| [续期提醒](#续期提醒和备注) | 填上每月续期日，到期前两天起在面板和小组件上提醒（默认不填、不提醒） |
 | [从 cc-switch 迁过来](#从-cc-switch-迁过来) | 导入在 [cc-switch](https://github.com/farion1231/cc-switch) 里登录过的 Claude 账号，还可以把它们的文件迁到 CCBaton 自己的目录，不用重新登录 |
 | [设置窗口](#设置窗口) | 开机启动、预热、提醒、小组件集中在一处 |
 | [软件更新](#软件更新) | 有新版时版本号前亮红点，点一下自动下载安装，只装签名对得上的包 |
+
+**1.3.1 新增**：[续期提醒和账号备注](#续期提醒和备注)。
 
 **1.3.0 新增**：[一键更新](#软件更新)、[多账号布局和拖动排序](#账号多的时候)、[额度预热](#额度预热)、[设置窗口](#设置窗口)、开终端前先选目录和参数并做好[账号隔离](#账号是怎么隔开的)。完整列表见[版本记录](#版本记录)。
 
@@ -49,7 +52,7 @@
      ```
 3. 想确认下载的文件没被改过：把 Releases 里对应的 `.sha256` 文件和 dmg 放在同一个文件夹，终端运行 `shasum -a 256 -c CCBaton-版本号-macos.dmg.sha256`，显示 `OK` 就对了。
 
-装好以后的新版本可以在软件里[一键更新](#软件更新)。1.2.0 及更早的版本没有这个功能，需要照上面手动装一次。
+装好以后的新版本可以在软件里[一键更新](#软件更新)。1.2.0 及更早的版本没有这个功能，需要照上面手动装一次（装之前先在面板里点"退出"，运行中的程序没法替换）。
 
 > 不放心的话，源码全部公开，可以自己看、自己编译（方式二）。
 
@@ -103,7 +106,7 @@ open build/CCBaton.app
 </table>
 
 - **顺序由你决定**：按住账号拖动，或右键选"上移 / 下移 / 移到最前"。程序不会自己挪账号的位置，使用中的账号也留在原位，只是高亮。新添加的账号排在最后。
-- 紧凑行里两个蓝色图标分别是"切换"和"终端"。鼠标停在名字上能看到套餐和两个重置时间；改名用右键。
+- 紧凑行里两个蓝色图标分别是"切换"和"终端"。鼠标停在名字上能看到套餐和两个重置时间；改名、写备注用右键。
 - 每个账号有固定的头像颜色，调整顺序后不变。
 
 菜单栏图标是双环：**外圈 5 小时，内圈 7 天**。用量吃紧时变橙、告急时变红，带淡淡的光晕（下面分别是 42% / 85% / 96%）：
@@ -280,9 +283,16 @@ Claude 的 5 小时额度要等你发出第一条消息才开始计时。几个�
 - **导入 cc-switch**：见[从 cc-switch 迁过来](#从-cc-switch-迁过来)。
 - **重新登录**：登录失效的账号，卡片上会出现"重新登录"按钮。
 - **调整顺序**：拖动，或右键"上移 / 下移 / 移到最前"。面板和小组件都按这个顺序排。
-- **修改显示名称**：点名字旁边的铅笔（或右键账号）。上半部分是这个账号真实登录的 Claude 信息，下半部分填你想显示的名字（比如"工作""个人"），留空就显示邮箱。不会改动真实登录。
+- **编辑账号**：点名字旁边的铅笔（或右键账号选"编辑账号…"）。上面是这个账号真实登录的 Claude 信息，下面可以填显示名称（比如"工作""个人"，留空就显示邮箱）、每月续期日和备注。不会改动真实登录。
 
-<p align="center"><img src="docs/screenshots/editor.png" width="420" alt="修改显示名称窗口，左下角是移除账号按钮"></p>
+<p align="center"><img src="docs/screenshots/editor.png" width="420" alt="编辑账号窗口：账号信息、显示名称、每月续期日、备注，左下角是移除账号按钮"></p>
+
+### 续期提醒和备注
+
+- **每月续期日**：默认"不提醒"。选了几号之后，到期前两天起提醒（后天续期 → 明天续期 → 今天续期），过了当天自动轮到下个月。那个月没有这一天（比如 2 月选了 31 号）按月底算。
+- **提醒在哪里**：面板的账号卡片底部显示"后天续期 · 几月几日"，紧凑布局里写在名字下面；小组件上账号名下面或旁边显示橙色文字，小号小组件里其他账号的头像带一个橙点。
+- 只是按你填的日期提醒，CCBaton 不知道实际有没有续费，也不弹系统通知。
+- **备注**：自己随便写（比如付款方式、用途），回车换行，点"保存"后存下来，只保存在这台电脑上。
 
 ### 移除账号
 
@@ -350,7 +360,7 @@ Claude Code 同一时间只认一个登录。CCBaton 的做法和 cc-switch 一�
 
 | 内容 | 位置 |
 |---|---|
-| 设置（账号列表和顺序、名字、头像颜色、小组件位置和尺寸、告警开关、预热开关和记录、最近目录和启动参数） | `~/Library/Application Support/ClaudeAccountBar/accounts.json` |
+| 设置（账号列表和顺序、名字、续期日、备注、头像颜色、小组件位置和尺寸、告警开关、预热开关和记录、最近目录和启动参数） | `~/Library/Application Support/ClaudeAccountBar/accounts.json` |
 | 新加账号的目录 | `~/Library/Application Support/ClaudeAccountBar/accounts/` |
 | 登录令牌 | macOS 钥匙串（`Claude Code-credentials…`），**不在文件里** |
 | "完全独立"终端的目录 | `~/Library/Application Support/ClaudeAccountBar/terminals/` |
@@ -403,7 +413,8 @@ CCBaton/
     ├── Removal.swift    移除账号：删哪些、警告框写什么
     ├── Migration.swift  把存放在 cc-switch 目录里的账号文件搬进本程序目录
     ├── MigrationTest.swift 迁移的测试
-    ├── Editor.swift     修改显示名称的窗口
+    ├── Editor.swift     编辑账号的窗口
+    ├── Renewal.swift    续期提醒的日期计算
     ├── Alerts.swift     额度告警：等级、光晕、通知
     ├── Warmup.swift     额度预热：什么时候激活哪个账号、发消息、核对
     ├── WarmupTest.swift 预热的测试（含模拟和假 claude）
@@ -481,6 +492,11 @@ rm -rf "$T"
 ---
 
 ## 版本记录
+
+### 1.3.1（2026-11-25）
+- 账号可以填**每月续期日**，到期前两天起在面板和小组件上提醒（默认不提醒）
+- 账号可以写**备注**
+- "修改显示名称"窗口改为"编辑账号"
 
 ### 1.3.0（2026-11-25）
 - **软件更新**：自动检查新版本（开机后一次，之后每天最多一次），版本号前亮红点，设置里一键下载安装；安装包要签名对得上才装，新版起不来自动退回

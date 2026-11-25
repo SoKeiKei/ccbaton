@@ -170,6 +170,9 @@ func runMultiTest() -> Int32 {
     check("点菜单项就切换到那个账号", chosen == ["d5"])
     AccountPopup.present = realPresent
 
+    print("— 续期提醒和备注")
+    renewalTests(m, check)
+
     print("— 移除账号")
     removalTests(m, check)
 
@@ -316,4 +319,90 @@ private func removalTests(_ m: Model, _ check: (String, Bool) -> Void) {
     let a1 = Account(id: "rg", label: "", configDir: live.configDir + "x"), a2 = Account(id: "rh", label: "", configDir: live.configDir + "x")
     login(a1.configDir, "uS"); m.store.accounts = [live, a1, a2]; m.states[a1.id] = AccountState()
     check("两个条目共用一个目录：只移出列表，登录保留", m.removeAccount(a1) == nil && ids() == ["ra", "rh"] && has(a2.configDir))
+}
+
+/// 续期提醒的日期计算、存盘、界面和编辑窗口
+@MainActor
+private func renewalTests(_ m: Model, _ check: (String, Bool) -> Void) {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+    func at(_ y: Int, _ mo: Int, _ d: Int, _ h: Int = 12, _ mi: Int = 0) -> Date { cal.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi))! }
+    func note(_ day: Int?, _ now: Date) -> String? { renewalNotice(day: day, from: now, calendar: cal)?.text }
+    func next(_ day: Int, _ now: Date) -> DateComponents? { nextRenewal(day: day, from: now, calendar: cal).map { cal.dateComponents([.year, .month, .day], from: $0) } }
+    func ymd(_ y: Int, _ mo: Int, _ d: Int) -> DateComponents { DateComponents(year: y, month: mo, day: d) }
+
+    check("还有三天：不提醒", note(28, at(2026, 11, 25)) == nil)
+    check("前两天起提醒：后天、明天、今天", note(28, at(2026, 11, 26, 0, 1)) == "后天续期" && note(28, at(2026, 11, 27)) == "明天续期" && note(28, at(2026, 11, 28, 23, 59)) == "今天续期")
+    check("过了当天就不提醒，轮到下个月", note(28, at(2026, 11, 29, 0, 1)) == nil && next(28, at(2026, 11, 29)) == ymd(2026, 12, 28))
+    check("跨月：月底提醒下月 1 号", note(1, at(2026, 11, 29)) == "后天续期" && next(1, at(2026, 11, 29)) == ymd(2026, 12, 1))
+    check("跨年", note(1, at(2026, 12, 30)) == "后天续期" && next(1, at(2026, 12, 30)) == ymd(2027, 1, 1))
+    check("2 月填 31 号按月底算（平年、闰年）", next(31, at(2027, 2, 26)) == ymd(2027, 2, 28) && note(31, at(2027, 2, 26)) == "后天续期" && next(30, at(2028, 2, 27)) == ymd(2028, 2, 29))
+    check("小月填 31 号按 30 号算", next(31, at(2027, 4, 28)) == ymd(2027, 4, 30))
+    check("月底那天过完，下个月仍按填的日子", next(31, at(2027, 3, 1)) == ymd(2027, 3, 31))
+    check("没填或填得不对：不提醒", note(nil, at(2026, 11, 26)) == nil && note(0, at(2026, 11, 26)) == nil && note(32, at(2026, 11, 26)) == nil)
+
+    applyManyDemo(m, count: 3)
+    m.setDetails(m.store.accounts[0], renewalDay: 15, note: "  第一行\n第二行  \n")
+    m.setDetails(m.store.accounts[1], renewalDay: 40, note: "   ")
+    m.setDetails(m.store.accounts[2], renewalDay: nil, note: String(repeating: "长", count: 3000))
+    let a = m.store.accounts
+    check("保存时：备注去掉首尾空白、保留换行；空白当没写；超长截到 2000 字；日期超范围当没填",
+          a[0].renewalDay == 15 && a[0].note == "第一行\n第二行" && a[1].renewalDay == nil && a[1].note == nil && a[2].note?.count == 2000)
+    let saved = try? JSONDecoder().decode(Store.self, from: JSONEncoder().encode(m.store))
+    check("重启后续期日和备注还在", saved?.accounts == m.store.accounts)
+    let old = Data(#"{"accounts":[{"id":"x","label":"旧","configDir":"/x"}],"workDir":"/"}"#.utf8)
+    let loaded = try? JSONDecoder().decode(Store.self, from: old)
+    check("旧版的设置文件照样读得进来", loaded?.accounts.first?.label == "旧" && loaded?.accounts.first?.renewalDay == nil && loaded?.accounts.first?.note == nil)
+
+    // 所有账号都在续期：小组件仍然是系统格子大小
+    let today = Calendar.current.component(.day, from: Date())
+    for size in WidgetSize.allCases {
+        var wrong: [String] = []
+        for n in 1...12 {
+            applyManyDemo(m, count: n)
+            for i in 0..<n { m.store.accounts[i].renewalDay = today; m.store.accounts[i].label = "名字特别长的账号\(i)" }
+            m.store.widgetSize = size.rawValue
+            let d = WidgetController.shared.desiredSize(m)
+            if abs(d.width - size.width) > 0.5 || abs(d.height - size.height) > 0.5 { wrong.append("\(n) 个→\(Int(d.width))×\(Int(d.height))") }
+        }
+        check("带提醒的\(size.title)：1～12 个账号大小不变\(wrong.isEmpty ? "" : "，不对的：" + wrong.joined(separator: "、"))", wrong.isEmpty)
+    }
+    func panel(_ n: Int, due: Int?) -> CGFloat {
+        applyManyDemo(m, count: n)
+        if let due { m.store.accounts[due].renewalDay = today }
+        return NSHostingView(rootView: MenuView(model: m)).fittingSize.height
+    }
+    AccountList.maxHeightOverride = 5000
+    check("大卡片多一行提醒，紧凑行不加高", panel(3, due: 1) > panel(3, due: nil) + 10 && panel(8, due: 3) == panel(8, due: nil))
+    AccountList.maxHeightOverride = nil
+
+    // 编辑窗口：备注框里回车是换行，名称框里回车是保存
+    applyManyDemo(m, count: 3)
+    let target = m.store.accounts[1]
+    func spin(_ s: TimeInterval) { RunLoop.current.run(until: Date().addingTimeInterval(s)) }
+    func find<T: NSView>(_ v: NSView?, _ type: T.Type, _ ok: (T) -> Bool = { _ in true }) -> T? {
+        guard let v else { return nil }
+        if let t = v as? T, ok(t) { return t }
+        for sub in v.subviews { if let t = find(sub, type, ok) { return t } }
+        return nil
+    }
+    AccountEditor.shared.open(m, account: target)
+    spin(0.8)
+    guard let w = AccountEditor.shared.window, let box = find(w.contentView, NSTextView.self, { !$0.isFieldEditor }),
+          let field = find(w.contentView, NSTextField.self, { $0.isEditable }) else { check("编辑窗口里有名称框和备注框", false); return }
+    check("编辑窗口：名称框、备注框都在，内容放得下", w.title == "编辑账号" && (w.contentView?.frame.height ?? 0) < 620 && box.frame.width > 300)
+    let enter = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: w.windowNumber,
+                                 context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+    w.makeFirstResponder(box); spin(0.5)
+    box.insertText("第一行", replacementRange: NSRange(location: NSNotFound, length: 0))
+    let swallowed = w.performKeyEquivalent(with: enter)
+    if !swallowed { box.keyDown(with: enter) }
+    box.insertText("第二行", replacementRange: NSRange(location: NSNotFound, length: 0))
+    spin(0.5)
+    check("备注框里按回车是换行，窗口不关", !swallowed && box.string == "第一行\n第二行" && AccountEditor.shared.window?.isVisible == true)
+    w.makeFirstResponder(field); spin(0.5)
+    _ = w.performKeyEquivalent(with: enter)
+    spin(0.5)
+    check("名称框里按回车保存并关窗，备注一起存下", AccountEditor.shared.window == nil && m.store.accounts[1].note == "第一行\n第二行")
+    AccountEditor.shared.window?.close()
 }

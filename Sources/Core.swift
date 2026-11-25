@@ -27,6 +27,8 @@ struct Account: Codable, Identifiable, Equatable {
     var id: String            // 目录名（32 位 hex）
     var label: String         // 用户起的名字，可为空
     var configDir: String     // 这个账号的 CLAUDE_CONFIG_DIR
+    var renewalDay: Int?      // 每月几号续期（1～31）；没填就不提醒
+    var note: String?         // 用户自己写的备注
 }
 
 struct AccountState {
@@ -65,7 +67,7 @@ struct Store: Codable {
     init(accounts: [Account], workDir: String) { self.accounts = accounts; self.workDir = workDir }
 
     // 兼容旧版文件：旧版的账号里 configDir 可为空（默认登录），旧版有 activeId
-    private struct Legacy: Codable { var id: String; var label: String; var configDir: String? }
+    private struct Legacy: Codable { var id: String; var label: String; var configDir: String?; var renewalDay: Int?; var note: String? }
     private enum K: String, CodingKey {
         case accounts, workDir, widgetVisible, widgetOrigin, widgetSize, alertsEnabled, alerted, warmupEnabled, warmupStagger, warmupRecords
         case recentDirs, terminalPrefs, terminalKept, colorSlots, autoUpdateCheck, updateCheckedAt, updateRelease
@@ -75,7 +77,7 @@ struct Store: Codable {
         var list: [Account] = []
         for old in (try? c.decode([Legacy].self, forKey: .accounts)) ?? [] {
             guard let dir = old.configDir else { continue }     // 旧版的"默认登录"条目丢掉，由程序重新收录
-            list.append(Account(id: old.id, label: old.label == "默认登录" ? "" : old.label, configDir: dir))
+            list.append(Account(id: old.id, label: old.label == "默认登录" ? "" : old.label, configDir: dir, renewalDay: old.renewalDay, note: old.note))
         }
         accounts = list
         workDir = (try? c.decode(String.self, forKey: .workDir)) ?? home
@@ -450,6 +452,15 @@ final class Model: ObservableObject {
     func rename(_ a: Account, to name: String) {
         guard let i = store.accounts.firstIndex(where: { $0.id == a.id }) else { return }
         store.accounts[i].label = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(24))
+        save()
+    }
+
+    /// 续期日和备注。续期日不在 1～31 里当没填；备注留空就不存
+    func setDetails(_ a: Account, renewalDay: Int?, note: String) {
+        guard let i = store.accounts.firstIndex(where: { $0.id == a.id }) else { return }
+        store.accounts[i].renewalDay = renewalDay.flatMap { (1...31).contains($0) ? $0 : nil }
+        let text = String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000))
+        store.accounts[i].note = text.isEmpty ? nil : text
         save()
     }
 
