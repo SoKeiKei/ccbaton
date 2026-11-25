@@ -128,8 +128,15 @@ extension Model {
         for slot in [Slot.account(a.configDir), backupSlot(a.configDir)] {
             if let s = (try? keychain.read(slot)) ?? nil, hasLogin(s), accountFingerprint(s) == accountFingerprint(backup) { return true }
         }
-        guard let org = backup["organizationUuid"] as? String, !org.isEmpty else { return false }
-        return identity(ofDir: a.configDir)?.key.hasSuffix(":" + org) ?? false
+        // 令牌可能续过期、指纹对不上：看切换时记下的备份主人
+        guard let key = identity(ofDir: a.configDir)?.key else { return false }
+        if let owner = keychain.backupOwner() { return owner == key }
+        // 旧版本留下的备份没有记录，只能按组织认。同一个组织（Team）里还有别的账号时认不准，留着不删
+        guard let org = backup["organizationUuid"] as? String, !org.isEmpty, key.hasSuffix(":" + org) else { return false }
+        return !store.accounts.contains { other in
+            guard other.id != a.id, let k = identity(ofDir: other.configDir)?.key else { return false }
+            return k != key && k.hasSuffix(":" + org)
+        }
     }
 
     /// 真正动手（不再询问）。成功返回 nil，失败返回原因，账号留在列表里

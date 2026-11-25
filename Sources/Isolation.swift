@@ -162,7 +162,7 @@ func switchWarning(target: Account, name: String, terminals: [RunningTerminal]) 
 extension Model {
     /// 没在用的登录放久了会过期：每 12 小时让 Claude 自己查一次额度（不花额度），顺便续上
     func keepTerminalLogins() async {
-        guard !Model.readOnly, !refreshing, let claude = claudePath else { return }
+        guard !Model.readOnly, !refreshing, let claude = await locateClaude(), !refreshing else { return }
         if testRoot != nil, !claude.hasPrefix(home + "/") { return }     // 沙盒里只用假 claude
         let kc = KeychainStore()
         let due = store.accounts.filter { a in

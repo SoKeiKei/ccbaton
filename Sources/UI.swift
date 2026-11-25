@@ -703,6 +703,7 @@ struct ClaudeAccountBarApp: App {
         if args.contains("--multitest") { exit(MainActor.assumeIsolated { runMultiTest() }) }
         if args.contains("--migratetest") { exit(MainActor.assumeIsolated { runMigrationTest() }) }
         if args.contains("--updatetest") { exit(MainActor.assumeIsolated { runUpdateTest() }) }
+        if args.contains("--robusttest") { exit(MainActor.assumeIsolated { runRobustTest() }) }
         if args.contains("--renametest") {
             guard testRoot != nil else { print("必须设置 CAB_TEST_ROOT"); exit(2) }
             var failed = 0

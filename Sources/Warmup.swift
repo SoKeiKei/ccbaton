@@ -201,7 +201,8 @@ extension Model {
 
     /// 每分钟跑一次（排在额度刷新后面）：先核对上次发的，再看现在该不该激活谁
     func warmupTick() async {
-        guard warmupOn, !Model.readOnly, !refreshing, !switching, let claude = claudePath else { return }
+        guard warmupOn, !Model.readOnly, !refreshing, !switching, let claude = await locateClaude(),
+              warmupOn, !refreshing, !switching else { return }     // 找 claude 可能花几秒，回来再看一遍
         let due = verificationsDue()
         if due.isEmpty { guard case .ping = currentWarmupPlan() else { return } }
         refreshing = true

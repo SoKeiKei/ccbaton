@@ -107,9 +107,9 @@ extension Model {
 
     /// 写盘并确认写进去了。搬账号时不能用"写失败也无所谓"的 save()
     private func saveOrThrow() throws {
-        guard !Model.readOnly else { throw SwitchError("只读模式下不能迁移") }
+        guard !Model.readOnly, storeWritable else { throw SwitchError("账号列表现在不能保存，不能迁移") }
         fillColorSlots()
-        try JSONEncoder().encode(store).write(to: storeURL, options: .atomic)
+        try writeStore(store)
     }
 
     /// 撤掉复制出来的东西。只动本程序账号目录里的

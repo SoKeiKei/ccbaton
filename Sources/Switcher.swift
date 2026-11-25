@@ -9,6 +9,7 @@
 
 import Foundation
 import CryptoKit
+import Security
 
 struct SwitchError: Error, CustomStringConvertible {
     let message: String
@@ -156,9 +157,21 @@ struct KeychainStore {
         }
     }
 
-    /// 只查有没有这个条目，不读内容（不会触发授权弹窗）
+    /// 只查有没有这个条目，不读内容（不会触发授权弹窗）。
+    /// 面板每次打开都要把所有账号查一遍，所以直接问系统，不为每个账号起一个 security 进程；系统答不上来才退回去用它
     func exists(_ slot: Slot) -> Bool {
-        if let r = try? runSecurity(["find-generic-password", "-a", keychainAccount, "-s", slot.service]), r.code == 0 { return true }
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrAccount as String: keychainAccount,
+                                    kSecAttrService as String: slot.service,
+                                    kSecMatchLimit as String: kSecMatchLimitOne,
+                                    kSecReturnAttributes as String: true]       // 只要属性，不要内容
+        var found: CFTypeRef?
+        switch SecItemCopyMatching(query as CFDictionary, &found) {
+        case errSecSuccess: return true
+        case errSecItemNotFound: break
+        default:
+            if let r = try? runSecurity(["find-generic-password", "-a", keychainAccount, "-s", slot.service]), r.code == 0 { return true }
+        }
         return FileManager.default.fileExists(atPath: slot.credentialsFile)
     }
 
@@ -171,8 +184,9 @@ struct KeychainStore {
     }
     private func deleteFile(_ slot: Slot) { try? FileManager.default.removeItem(atPath: slot.credentialsFile) }
 
-    // 提交前的整份备份（只一份，每次切换覆盖）
-    func writeBackup(_ secret: Secret) throws {
+    // 提交前的整份备份（只一份，每次切换覆盖）。owner 是备份里那个账号的 key（不含令牌），移除账号时靠它认人
+    func writeBackup(_ secret: Secret, owner: String? = nil) throws {
+        try? FileManager.default.removeItem(at: backupOwnerURL)     // 先去掉旧记录，免得和新备份对不上
         let hex = hexEncode(secretData(secret))
         let svc = servicePrefix == "Claude Code-credentials" ? "ClaudeAccountBar-backup" : "CABTEST-backup"
         let line = "add-generic-password -U -a \"\(keychainAccount)\" -s \"\(svc)\" -X \"\(hex)\"\n"
@@ -180,7 +194,12 @@ struct KeychainStore {
         if line.utf8.count <= 4032 { r = try runSecurity(["-i"], stdin: Data(line.utf8)) }
         else { r = try runSecurity(["add-generic-password", "-U", "-a", keychainAccount, "-s", svc, "-X", hex]) }
         if r.code != 0 { throw SwitchError("备份当前登录失败，没有切换") }
+        if let owner {
+            try? FileManager.default.createDirectory(atPath: supportDir, withIntermediateDirectories: true)
+            try? Data(owner.utf8).write(to: backupOwnerURL, options: .atomic)
+        }
     }
+    func backupOwner() -> String? { (try? String(contentsOf: backupOwnerURL, encoding: .utf8)).flatMap { $0.isEmpty ? nil : $0 } }
     func readBackup() -> Secret? {
         let svc = servicePrefix == "Claude Code-credentials" ? "ClaudeAccountBar-backup" : "CABTEST-backup"
         guard let r = try? runSecurity(["find-generic-password", "-a", keychainAccount, "-s", svc, "-w"]), r.code == 0 else { return nil }
@@ -190,6 +209,7 @@ struct KeychainStore {
     func deleteBackup() {
         let svc = servicePrefix == "Claude Code-credentials" ? "ClaudeAccountBar-backup" : "CABTEST-backup"
         _ = try? runSecurity(["delete-generic-password", "-a", keychainAccount, "-s", svc])
+        try? FileManager.default.removeItem(at: backupOwnerURL)
     }
 }
 
@@ -350,10 +370,11 @@ struct Journal: Codable {
     var step: String        // committed / done
 }
 let journalURL = URL(fileURLWithPath: supportDir + "/switch-journal.json")
+let backupOwnerURL = URL(fileURLWithPath: supportDir + "/backup-owner")
 func saveJournal(_ j: Journal?) {
     guard let j else { try? FileManager.default.removeItem(at: journalURL); return }
     try? FileManager.default.createDirectory(atPath: supportDir, withIntermediateDirectories: true)
-    try? JSONEncoder().encode(j).write(to: journalURL)
+    try? JSONEncoder().encode(j).write(to: journalURL, options: .atomic)
 }
 func loadJournal() -> Journal? {
     guard let d = try? Data(contentsOf: journalURL) else { return nil }
@@ -396,7 +417,7 @@ struct Switcher {
         }
 
         // 备份默认槽位原来的整份登录（只留一份，出事能手动找回）
-        if let live { try store.writeBackup(live) }
+        if let live { try store.writeBackup(live, owner: liveOwner?.key) }
 
         // 1. 收回：原来的号 O 写回它自己的槽位
         var previous: String? = nil

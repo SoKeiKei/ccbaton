@@ -6,7 +6,7 @@
 
 *English: CCBaton is a native macOS menu-bar app and desktop widget for people who use several Claude Code subscriptions. It shows each account's 5-hour / 7-day quota, switches the account Claude Code is signed in with in one click, opens a terminal per account with a directory picker and launch options (shielded from third-party API settings; optional full isolation from account switching), warns you before a quota runs out, updates itself in one click from signed GitHub releases, and can optionally (off by default) start idle accounts' 5-hour windows early, staggered so they reset at different times. Swift, no dependencies, MIT licensed. Unofficial — not affiliated with Anthropic.*
 
-> 当前版本 **1.3.1**　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)　·　macOS 14 或更高
+> 当前版本 **1.3.2**　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)　·　macOS 14 或更高
 
 <p align="center"><img src="docs/screenshots/hero.png" width="860" alt="CCBaton 总览：菜单栏面板带换号建议、额度告警和预热状态，右边是中号和大号桌面小组件"></p>
 
@@ -361,10 +361,12 @@ Claude Code 同一时间只认一个登录。CCBaton 的做法和 cc-switch 一�
 | 内容 | 位置 |
 |---|---|
 | 设置（账号列表和顺序、名字、续期日、备注、头像颜色、小组件位置和尺寸、告警开关、预热开关和记录、最近目录和启动参数） | `~/Library/Application Support/ClaudeAccountBar/accounts.json` |
+| 账号列表的备份（内容和上一行相同）。列表文件坏了会自动用它恢复，坏文件另存为 `accounts.json.broken-…` 并弹窗告诉你 | `~/Library/Application Support/ClaudeAccountBar/accounts.json.bak` |
 | 新加账号的目录 | `~/Library/Application Support/ClaudeAccountBar/accounts/` |
 | 登录令牌 | macOS 钥匙串（`Claude Code-credentials…`），**不在文件里** |
 | "完全独立"终端的目录 | `~/Library/Application Support/ClaudeAccountBar/terminals/` |
 | 切换前的备份 | 钥匙串条目 `ClaudeAccountBar-backup` |
+| 上面那份备份属于哪个账号（只记账号编号，不含令牌） | `~/Library/Application Support/ClaudeAccountBar/backup-owner` |
 | 从 cc-switch 导入的账号 | 迁移前仍在 `~/.cc-switch/claude-accounts/`（只登记路径，没复制）；迁移后和新加的账号放在一起 |
 | 移除或迁移账号时备份的 cc-switch 记录（不含令牌） | `~/Library/Application Support/ClaudeAccountBar/backups/` |
 | 更新时下载的安装包和记录（更新成功后清掉安装包） | `~/Library/Application Support/ClaudeAccountBar/update/` |
@@ -426,6 +428,7 @@ CCBaton/
     ├── LoginItem.swift  开机启动（系统登录项）
     ├── Update.swift     软件更新：检查、核对签名、替换自己、失败退回
     ├── UpdateTest.swift 更新的测试
+    ├── RobustTest.swift 账号列表损坏、找 claude 卡住、只读模式等情况的测试
     └── SelfTest.swift   切换引擎的沙盒自检
 ```
 
@@ -461,7 +464,7 @@ cd CCBaton
 | `--check-terminal-login 目录 账号` | 启动脚本内部用：核对独立终端登录的是不是这个账号 |
 | `--check-update` | 问一次 GitHub 最新版本是多少（只读，不下载） |
 | `--alerttest` | 告警逻辑测试（纯计算，不发通知） |
-| `--selftest` / `--widgettest` / `--renametest` / `--warmuptest` / `--terminaltest` / `--multitest` / `--migratetest` / `--updatetest` | 沙盒测试，**必须**设 `CAB_TEST_ROOT`（`--warmuptest`、`--terminaltest` 用假的 claude，不花额度；`--widgettest`、`--multitest` 运行时屏幕上会短暂出现小窗口） |
+| `--selftest` / `--widgettest` / `--renametest` / `--warmuptest` / `--terminaltest` / `--multitest` / `--migratetest` / `--updatetest` / `--robusttest` | 沙盒测试，**必须**设 `CAB_TEST_ROOT`（`--warmuptest`、`--terminaltest` 用假的 claude，不花额度；`--widgettest`、`--multitest` 运行时屏幕上会短暂出现小窗口） |
 
 沙盒测试的用法（假账号、假钥匙串条目名带 `CABTEST`，完全不碰真实登录）：
 ```
@@ -492,6 +495,15 @@ rm -rf "$T"
 ---
 
 ## 版本记录
+
+### 1.3.2（2026-11-25）
+稳定性修复，界面没有变化。
+- **账号列表更不容易丢**：改成整份写入（写到一半断电不会留下坏文件），并留一份备份；万一文件坏了，自动用备份恢复、坏文件另存一份、弹窗告诉你。以前可能悄悄变成空列表，再盖掉原文件
+- 查找 `claude` 命令改到后台并限时 10 秒，终端配置卡住时软件不再跟着没反应；没找到时过几分钟会再找，装好后不用重启软件
+- 打开面板更快，账号多时不再卡一下
+- 移除账号时，不会再误删同一个 Team 组织里另一个账号的切换前备份
+- 只读的命令行参数（`--check`、`--dump`、截图）不再写任何文件
+- 切换记录改成整份写入
 
 ### 1.3.1（2026-11-25）
 - 账号可以填**每月续期日**，到期前两天起在面板和小组件上提醒（默认不提醒）

@@ -75,7 +75,8 @@ struct Store: Codable {
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
         var list: [Account] = []
-        for old in (try? c.decode([Legacy].self, forKey: .accounts)) ?? [] {
+        // 账号部分缺了或格式不对要报错：悄悄当成空列表的话，下一次存盘就把原来的盖掉了
+        for old in try c.decode([Legacy].self, forKey: .accounts) {
             guard let dir = old.configDir else { continue }     // 旧版的"默认登录"条目丢掉，由程序重新收录
             list.append(Account(id: old.id, label: old.label == "默认登录" ? "" : old.label, configDir: dir, renewalDay: old.renewalDay, note: old.note))
         }
@@ -117,6 +118,66 @@ struct Store: Codable {
         try c.encodeIfPresent(updateCheckedAt, forKey: .updateCheckedAt)
         try c.encodeIfPresent(updateRelease, forKey: .updateRelease)
     }
+}
+
+// MARK: - 账号列表的读写
+
+/// 和账号列表内容相同的备份，列表文件坏了时用它恢复
+let storeBackupURL = URL(fileURLWithPath: storeURL.path + ".bak")
+
+struct StoreProblem: Equatable {
+    let title: String
+    let message: String
+}
+
+struct LoadedStore {
+    var store: Store
+    var problem: StoreProblem?      // 账号列表读坏了时告诉用户
+    var writable = true             // 坏文件挪不走时为 false：这时存盘会盖掉它，所以不存
+}
+
+/// 读账号列表。文件坏了：先复制一份留底，再用备份（没有就用空列表）盖掉原文件。readOnly 时不动任何文件。
+func loadStore(readOnly: Bool) -> LoadedStore {
+    let fm = FileManager.default
+    let empty = Store(accounts: [], workDir: home)
+    guard fm.fileExists(atPath: storeURL.path) else { return LoadedStore(store: empty) }
+    func decode(_ data: Data?) -> Store? { data.flatMap { try? JSONDecoder().decode(Store.self, from: $0) } }
+    let data = try? Data(contentsOf: storeURL)
+    if let data, let s = decode(data) {
+        if !readOnly { try? data.write(to: storeBackupURL, options: .atomic) }
+        return LoadedStore(store: s)
+    }
+    let restored = decode(try? Data(contentsOf: storeBackupURL))
+    if readOnly { return LoadedStore(store: restored ?? empty, writable: false) }
+
+    let stamp = DateFormatter()
+    stamp.locale = Locale(identifier: "en_US_POSIX")
+    stamp.dateFormat = "yyyyMMdd-HHmmss"
+    let kept = storeURL.path + ".broken-\(stamp.string(from: Date()))-\(newLocalId().prefix(4))"
+    // 用复制不用改名：万一接下来写不进去，下次启动看到的还是坏文件，会再从备份恢复一次
+    do { try fm.copyItem(atPath: storeURL.path, toPath: kept) } catch {
+        return LoadedStore(store: restored ?? empty, problem: StoreProblem(
+            title: "账号列表文件读不出来",
+            message: "原文件没法复制一份留底，这次运行里的改动不会保存，免得盖掉它。\n\n文件位置：\((storeURL.path as NSString).abbreviatingWithTildeInPath)"), writable: false)
+    }
+    let place = "坏掉的原文件复制了一份保留在：\n\((kept as NSString).abbreviatingWithTildeInPath)"
+    try? writeStore(restored ?? empty)
+    guard let restored else {
+        return LoadedStore(store: empty, problem: StoreProblem(
+            title: "账号列表文件坏了，读不出来",
+            message: "账号的登录和文件没有删，但名字、备注、排序等设置没能读出来，列表里可能只剩正在使用的账号。\n\n" + place))
+    }
+    return LoadedStore(store: restored, problem: StoreProblem(
+        title: "账号列表文件坏了，已用备份恢复",
+        message: "请看一下账号、名字、续期日和备注是否都对。\n\n" + place))
+}
+
+/// 整份写进磁盘（先写临时文件再换上去，写到一半断电也不会留下半个文件），再留一份同样内容的备份
+func writeStore(_ s: Store) throws {
+    let data = try JSONEncoder().encode(s)
+    try FileManager.default.createDirectory(atPath: supportDir, withIntermediateDirectories: true)
+    try data.write(to: storeURL, options: .atomic)
+    try? data.write(to: storeBackupURL, options: .atomic)
 }
 
 let isoFrac: ISO8601DateFormatter = {
@@ -181,18 +242,38 @@ func newLocalId() -> String { UUID().uuidString.replacingOccurrences(of: "-", wi
 
 // MARK: - 找 claude、刷新额度
 
-func findClaude() -> String? {
-    for p in [home + "/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
-    where FileManager.default.isExecutableFile(atPath: p) { return p }
+let claudeCandidates = [home + "/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude",
+                        home + "/.claude/local/claude"]
+
+/// 先看常见的安装位置，没有再问用户的 zsh。会等几秒，别在主线程上调用。
+/// zsh 要读用户自己的配置文件，里面可能卡住或打印别的东西，所以：限时，超时强制结束；只认带记号的那一行；
+/// 输出写到临时文件（用管道的话，配置里留下的后台程序会让读取一直等下去）。
+func findClaude(candidates: [String] = claudeCandidates, environment: [String: String]? = nil, timeout: TimeInterval = 10) -> String? {
+    let fm = FileManager.default
+    if let p = candidates.first(where: { fm.isExecutableFile(atPath: $0) }) { return p }
+    let marker = "__CCBATON__"
+    let tmp = fm.temporaryDirectory.appendingPathComponent("ccbaton-which-" + newLocalId())
+    guard fm.createFile(atPath: tmp.path, contents: nil, attributes: [.posixPermissions: 0o600]),
+          let out = try? FileHandle(forWritingTo: tmp) else { return nil }
+    defer { try? out.close(); try? fm.removeItem(at: tmp) }
     let sh = Process()
     sh.executableURL = URL(fileURLWithPath: "/bin/zsh")
-    sh.arguments = ["-ilc", "command -v claude"]
-    let pipe = Pipe(); sh.standardOutput = pipe; sh.standardError = Pipe()
+    sh.arguments = ["-ilc", "builtin print; builtin print -r -- \"\(marker)$(builtin whence -p claude)\""]
+    if let environment { sh.environment = environment }
+    sh.standardInput = FileHandle.nullDevice
+    sh.standardOutput = out
+    sh.standardError = FileHandle.nullDevice
+    let done = DispatchSemaphore(value: 0)
+    sh.terminationHandler = { _ in done.signal() }
     guard (try? sh.run()) != nil else { return nil }
-    sh.waitUntilExit()
-    let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    return out.isEmpty ? nil : out
+    if done.wait(timeout: .now() + timeout) == .timedOut {
+        kill(sh.processIdentifier, SIGKILL)          // 交互模式的 zsh 不理会普通的结束信号。只结束 zsh，配置里另起的子进程会留着
+        sh.waitUntilExit()
+    }
+    let text = String(decoding: (try? Data(contentsOf: tmp)) ?? Data(), as: UTF8.self)
+    guard let line = text.split(separator: "\n").last(where: { $0.hasPrefix(marker) }) else { return nil }
+    let path = String(line.dropFirst(marker.count))
+    return path.hasPrefix("/") && fm.isExecutableFile(atPath: path) ? path : nil
 }
 
 /// 跑一次 claude（不要输入输出），返回退出码；起不来返回 -1。configDir 为 nil 表示默认槽位。
@@ -327,22 +408,52 @@ final class Model: ObservableObject {
 
     var lastRun: [String: Date] = [:]
     private var timer: Timer?
-    lazy var claudePath: String? = findClaude()
     private let keychain = KeychainStore()
+
+    private(set) var storeWritable = true
+    private(set) var storeProblem: StoreProblem?
+
+    // 找 claude（见 findClaude）；下面两个值在测试里换掉
+    var searchClaude: @Sendable () -> String? = { findClaude() }
+    var claudeRetryAfter: TimeInterval = 300
+    private var claudeFound: String?
+    private var claudeMissedAt: Date?
+    private var claudeSearch: Task<String?, Never>?
+
+    /// claude 在哪。在后台找；找到的记住（文件还在就一直用），没找到的过几分钟再找，searchNow 时马上再找
+    func locateClaude(searchNow: Bool = false) async -> String? {
+        if let p = claudeFound, FileManager.default.isExecutableFile(atPath: p) { return p }
+        if let running = claudeSearch { return await running.value }
+        if !searchNow, let t = claudeMissedAt, Date().timeIntervalSince(t) < claudeRetryAfter { return nil }
+        let search = searchClaude
+        let task = Task<String?, Never> {
+            await withCheckedContinuation { c in DispatchQueue.global().async { c.resume(returning: search()) } }
+        }
+        claudeSearch = task
+        let found = await task.value
+        claudeSearch = nil
+        claudeFound = found
+        claudeMissedAt = found == nil ? Date() : nil
+        return found
+    }
 
     var live: Account? { store.accounts.first { states[$0.id]?.live == true } }
 
     init() {
-        try? FileManager.default.createDirectory(atPath: supportDir, withIntermediateDirectories: true)
-        if let d = try? Data(contentsOf: storeURL), let s = try? JSONDecoder().decode(Store.self, from: d) {
-            store = s
-        } else {
-            store = Store(accounts: [], workDir: home)
-        }
-        Switcher(dirOf: { _ in nil }).recover()
-        if !Model.readOnly { recoverMigration(); finishPendingUpdate() }
+        if !Model.readOnly { try? FileManager.default.createDirectory(atPath: supportDir, withIntermediateDirectories: true) }
+        let loaded = loadStore(readOnly: Model.readOnly)
+        store = loaded.store
+        storeWritable = loaded.writable
+        storeProblem = loaded.problem
+        if !Model.readOnly { Switcher(dirOf: { _ in nil }).recover(); recoverMigration(); finishPendingUpdate() }
         ensureLiveManaged()
         reloadStates()
+        if let problem = loaded.problem {       // 等程序起来再弹，启动过程中弹窗会卡住
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                self?.tellUser(problem.title, problem.message)
+            }
+        }
         if !Model.readOnly {            // 只读模式（截图、预检）不自动刷新，也不跑 claude
             timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
                 Task { @MainActor in
@@ -368,9 +479,9 @@ final class Model: ObservableObject {
     static var demo = false
 
     func save() {
-        if Model.readOnly { return }
+        if Model.readOnly || !storeWritable { return }
         fillColorSlots()
-        if let d = try? JSONEncoder().encode(store) { try? d.write(to: storeURL) }
+        try? writeStore(store)
     }
 
     // 默认位置里现在登录的号，必须有自己的账号目录（切走时登录要收回到那里）
@@ -382,7 +493,8 @@ final class Model: ObservableObject {
                                           label: "", configDir: dir))
             save(); return
         }
-        // 全新收录：建一个账号目录，资料从默认的 .claude.json 复制
+        // 全新收录：建一个账号目录，资料从默认的 .claude.json 复制。存不了账号列表时不建，免得每次都多出一个没人认领的目录
+        guard !Model.readOnly, storeWritable else { return }
         let id = newLocalId()
         let cfg = "\(supportDir)/accounts/\(id)/config"
         guard (try? prepareAccountDir(cfg)) != nil,
@@ -478,10 +590,9 @@ final class Model: ObservableObject {
 
     /// 额度由 Claude Code 自己更新；同一个账号 10 分钟内最多跑一次，除非手动刷新。
     func refreshAll(force: Bool) async {
-        guard !refreshing, let claude = claudePath else {
-            if claudePath == nil { notice = "找不到 claude 命令" }
-            return
-        }
+        guard !refreshing else { return }
+        guard let claude = await locateClaude(searchNow: force) else { notice = "找不到 claude 命令"; return }
+        guard !refreshing else { return }           // 找的那几秒里别的任务可能已经开始读了
         refreshing = true
         for a in store.accounts {
             guard let st = states[a.id], st.loggedIn else { continue }
@@ -605,6 +716,6 @@ final class Model: ObservableObject {
             print("[\(a.id.prefix(8))] \(displayName(a)) live=\(s.live) 可用=\(s.loggedIn) plan=\(s.plan) 5h=\(s.fiveHour.map { "\($0)%" } ?? "-") 7d=\(s.sevenDay.map { "\($0)%" } ?? "-")")
             print("   终端脚本: " + terminalScript(a, terminalPrefs(a), terminalMode(a) ?? .shared).split(separator: "\n").joined(separator: " ; "))
         }
-        print("claude 路径: \(claudePath ?? "未找到")")
+        print("claude 路径: \(findClaude() ?? "未找到")")
     }
 }
