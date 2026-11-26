@@ -90,9 +90,9 @@ extension Model {
         let five = effectiveUse(s.fiveHour, s.fiveReset), seven = effectiveUse(s.sevenDay, s.sevenReset)
         let worst = max(five, seven)
         guard worst >= switchAdviceAt else { return nil }
-        let head = "当前账号 \(seven > five ? "7 天" : "5 小时")额度已用 \(Int(worst))%"
+        let head = "当前账号 \(seven > five ? "7 天" : "5 小时")额度\(showRemaining ? "只" : "")\(quotaWords(worst, remaining: showRemaining))"
         guard let r = recommendedAccount(accounts: store.accounts, states: states) else { return SwitchAdvice(text: head, target: nil) }
-        return SwitchAdvice(text: "\(head)\n「\(shortDisplayName(r.account))」还有空（已用 \(Int(r.used))%）", target: r.account)
+        return SwitchAdvice(text: "\(head)\n「\(shortDisplayName(r.account))」还有空（\(quotaWords(r.used, remaining: showRemaining))）", target: r.account)
     }
 
     func avatarColor(of a: Account) -> Color {
@@ -156,13 +156,15 @@ struct Avatar: View {
 /// 窄的小进度条：左边标题，右边百分数，下面一条
 struct MiniMeter: View {
     let title: String
-    let value: Double?
+    let value: Double?        // 已用百分比
+    let remaining: Bool
     var body: some View {
-        VStack(spacing: 2) {
+        let shown = quotaShown(value, remaining: remaining)
+        return VStack(spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text(title).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 0)
-                Text(value.map { "\(Int($0))%" } ?? "—")
+                Text(quotaText(value, remaining: remaining))
                     .font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit().lineLimit(1).fixedSize()
                     .foregroundStyle((value ?? 0) >= 80 ? levelColor(value) : .primary)
             }
@@ -170,8 +172,8 @@ struct MiniMeter: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.12))
                     Capsule().fill(levelColor(value))
-                        .frame(width: max(value == nil ? 0 : 3, g.size.width * CGFloat(min(max(value ?? 0, 0), 100) / 100)))
-                        .animation(.easeOut(duration: 0.7), value: value)
+                        .frame(width: max(value == nil ? 0 : 3, g.size.width * CGFloat(min(max(shown ?? 0, 0), 100) / 100)))
+                        .animation(.easeOut(duration: 0.7), value: shown)
                 }
             }.frame(height: 4)
         }
@@ -221,8 +223,8 @@ struct AccountRow: View {
             .frame(width: 86, alignment: .leading)
             .help(tip)
             if st.loggedIn {
-                MiniMeter(title: "5时", value: st.fiveHour)
-                MiniMeter(title: "7天", value: st.sevenDay)
+                MiniMeter(title: "5时", value: st.fiveHour, remaining: model.showRemaining)
+                MiniMeter(title: "7天", value: st.sevenDay, remaining: model.showRemaining)
                 HStack(spacing: 5) {
                     Button { model.switchTo(account) } label: { Image(systemName: "arrow.left.arrow.right").frame(width: 13, height: 13) }
                         .buttonStyle(.borderedProminent).controlSize(.small).disabled(model.switching).help("切换到这个账号")
@@ -382,7 +384,7 @@ enum AccountPopup {
         let recommended = model.switchAdvice?.target?.id
         for a in accounts {
             let s = model.states[a.id] ?? AccountState()
-            func pct(_ v: Double?) -> String { v.map { "\(Int($0))%" } ?? "—" }
+            func pct(_ v: Double?) -> String { (model.showRemaining ? "剩 " : "") + quotaText(v, remaining: model.showRemaining) }
             let info = s.loggedIn ? "5 小时 \(pct(s.fiveHour)) · 7 天 \(pct(s.sevenDay))" : "需要重新登录"
             let due = model.renewal(a).map { "　\($0.text)" } ?? ""
             let item = ActionMenuItem("\(model.shortDisplayName(a))　\(info)\(a.id == recommended ? "　推荐" : "")\(due)") { onSwitch(a) }

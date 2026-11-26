@@ -125,6 +125,36 @@ func runSelfTest() -> Int32 {
         check("补完后日志是 done", loadJournal()?.step == "done")
     } catch { check("崩溃补完场景不报错（\(error)）", false) }
 
+    print("场景 7：切换时两边的额度缓存跟着账号走")
+    do {
+        func usage(_ uuid: String, _ at: Int, _ five: Int) -> [String: Any] {
+            ["accountUuid": uuid, "fetchedAtMs": at, "utilization": ["five_hour": ["utilization": five]]]
+        }
+        func setUsage(_ path: String, _ u: [String: Any]) {
+            var doc = readProfile(path) ?? [:]; doc["cachedUsageUtilization"] = u; writeJSON(path, doc)
+        }
+        func five(_ path: String) -> Double? { readState(path: path).fiveHour }
+        let defPath = root + "/.claude.json", aPath = aDir + "/.claude.json", bPath = bDir + "/.claude.json"
+
+        _ = try sw.checkOut(target: keyA, targetDir: aDir)
+        setUsage(defPath, usage("uA", 2000, 98))      // A 在用时读到的最新额度
+        setUsage(aPath, usage("uA", 1000, 0))         // A 目录里是很久以前的旧缓存
+        setUsage(bPath, usage("uB", 1500, 12))
+        _ = try sw.checkOut(target: keyB, targetDir: bDir)
+        check("切走的号仍显示最后读到的 98%", five(aPath) == 98)
+        check("切上来的号带着自己的 12%", five(defPath) == 12)
+
+        setUsage(defPath, usage("uB", 1000, 40))      // 默认位置的缓存反而比目录里的旧
+        setUsage(bPath, usage("uB", 3000, 55))
+        _ = try sw.checkOut(target: keyA, targetDir: aDir)
+        check("两份缓存取读取时间新的（切走）", five(bPath) == 55)
+        check("切回来的号带着 98%", five(defPath) == 98)
+
+        setUsage(defPath, usage("uB", 9000, 77))      // 默认位置混进了别的号的缓存
+        _ = try sw.checkOut(target: keyB, targetDir: bDir)
+        check("别的号的缓存不会写到切走的号上", five(aPath) == 98)
+    } catch { check("额度缓存场景不报错（\(error)）", false) }
+
     cleanup()
     print(failed == 0 ? "\n全部通过" : "\n有 \(failed) 项失败")
     return failed == 0 ? 0 : 1

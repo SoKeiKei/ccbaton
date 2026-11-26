@@ -141,6 +141,10 @@ struct SettingsView: View {
                     SettingSwitch(title: "开机启动", isOn: Binding(get: { loginOn }, set: { setLogin($0) }))
                     SettingNote(text: loginNote).lineLimit(2).frame(height: 28, alignment: .topLeading)
                 }
+                VStack(alignment: .leading, spacing: 3) {
+                    SettingSwitch(title: "显示剩余额度", isOn: Binding(get: { model.showRemaining }, set: { model.setShowRemaining($0) }))
+                    SettingNote(text: "关着时显示已用了多少；打开后各处都改成还剩多少。")
+                }
                 if showImport {
                     HStack(spacing: 8) {
                         Text(importMessage.isEmpty ? "导入在 cc-switch 里登录的账号" : importMessage)
@@ -183,7 +187,7 @@ struct SettingsView: View {
             SettingGroup(title: "额度提醒", icon: "bell") {
                 SettingSwitch(title: "额度告急时弹系统通知", isOn: Binding(get: { model.alertsOn }, set: { model.setAlerts($0) }))
                 HStack {
-                    SettingNote(text: "用到 90% 和用完时各提醒一次。")
+                    SettingNote(text: model.showRemaining ? "剩 10% 和用完时各提醒一次。" : "用到 90% 和用完时各提醒一次。")
                     Spacer(minLength: 8)
                     Button("发送测试提醒") { model.sendTestAlert() }.controlSize(.small)
                 }

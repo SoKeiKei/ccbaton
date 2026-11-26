@@ -6,7 +6,7 @@
 
 *English: CCBaton is a native macOS menu-bar app and desktop widget for people who use several Claude Code subscriptions. It shows each account's 5-hour / 7-day quota, switches the account Claude Code is signed in with in one click, opens a terminal per account with a directory picker and launch options (shielded from third-party API settings; optional full isolation from account switching), warns you before a quota runs out, updates itself in one click from signed GitHub releases, and can optionally (off by default) start idle accounts' 5-hour windows early, staggered so they reset at different times. Swift, no dependencies, MIT licensed. Unofficial — not affiliated with Anthropic.*
 
-> 当前版本 **1.3.2**　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)　·　macOS 14 或更高
+> 当前版本 **1.4.0**　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)　·　macOS 14 或更高
 
 <p align="center"><img src="docs/screenshots/hero.png" width="860" alt="CCBaton 总览：菜单栏面板带换号建议、额度告警和预热状态，右边是中号和大号桌面小组件"></p>
 
@@ -18,7 +18,7 @@
 
 | 功能 | 说明 |
 |---|---|
-| [看额度](#菜单栏面板) | 每个账号的 5 小时额度、7 天额度、多久后重置 |
+| [看额度](#菜单栏面板) | 每个账号的 5 小时额度、7 天额度、多久后重置；可以按[已用或剩余](#已用还是剩余)显示 |
 | [一键切换](#菜单栏面板) | 换掉 Claude Code 登录的账号。新开的和正在运行的普通 `claude`，下一条消息起都用新账号 |
 | [额度告警](#额度告警) | 用量吃紧变橙、告急变红，面板顶部建议换号；快用完时弹系统通知 |
 | [打开终端](#打开终端) | 给某个账号单独开终端：现选目录、可加启动参数；可选"完全独立"，切换账号也不影响它 |
@@ -30,6 +30,8 @@
 | [从 cc-switch 迁过来](#从-cc-switch-迁过来) | 导入在 [cc-switch](https://github.com/farion1231/cc-switch) 里登录过的 Claude 账号，还可以把它们的文件迁到 CCBaton 自己的目录，不用重新登录 |
 | [设置窗口](#设置窗口) | 开机启动、预热、提醒、小组件集中在一处 |
 | [软件更新](#软件更新) | 有新版时版本号前亮红点，点一下自动下载安装，只装签名对得上的包 |
+
+**1.4.0 新增**：[显示剩余额度](#已用还是剩余)开关；修正切换账号后原账号额度显示不对。
 
 **1.3.1 新增**：[续期提醒和账号备注](#续期提醒和备注)。
 
@@ -94,6 +96,12 @@ open build/CCBaton.app
 - **预热状态**：开了额度预热才有，点一下打开设置。
 - **底部**：添加账号、设置、版本号、退出。
 
+### 已用还是剩余
+
+默认显示**已用**了多少。习惯看还剩多少的，在[设置](#设置窗口)里打开"显示剩余额度"，面板、菜单栏图标和数字、桌面小组件、换号建议和系统通知会一起换过来：进度条和圆环表示还剩的部分，面板和中号、大号小组件的标题旁标着"剩余额度"。只是换个看法，变橙、变红、提醒和推荐账号的时机都不变。
+
+<p align="center"><img src="docs/screenshots/remaining.png" width="760" alt="打开显示剩余额度后的菜单栏面板、小号和中号小组件"><br><sub>打开"显示剩余额度"后：96% 已用显示成剩 4%</sub></p>
+
 ### 账号多的时候
 
 5 个以内都是大卡片。**6 个起**自动换成紧凑布局：使用中的账号还是大卡片，其他每个一行。账号多到超出屏幕时，中间部分可以滚动。
@@ -124,7 +132,7 @@ open build/CCBaton.app
 
 ## 额度告警
 
-看 5 小时和 7 天里更高的那个：
+看 5 小时和 7 天里更高的那个（下面按已用来说；[显示剩余额度](#已用还是剩余)时，对应剩 20% 和 5% 以内）：
 
 | 用量 | 表现 |
 |---|---|
@@ -240,11 +248,11 @@ Claude 的 5 小时额度要等你发出第一条消息才开始计时。几个�
 
 面板底部点"设置"（小组件右键也能打开）。
 
-<p align="center"><img src="docs/screenshots/settings.png" width="460" alt="设置窗口：开机启动、额度预热、额度提醒、桌面小组件"></p>
+<p align="center"><img src="docs/screenshots/settings.png" width="460" alt="设置窗口：开机启动、显示剩余额度、额度预热、额度提醒、桌面小组件"></p>
 
 | 分组 | 里面有什么 |
 |---|---|
-| 通用 | 开机启动；装着 cc-switch 且有账号还没导入时，多一行"导入在 cc-switch 里登录的账号" |
+| 通用 | 开机启动、[显示剩余额度](#已用还是剩余)（默认关）；装着 cc-switch 且有账号还没导入时，多一行"导入在 cc-switch 里登录的账号" |
 | 账号文件位置 | 只在有账号的文件还在 cc-switch 目录里时出现：[迁移到 CCBaton](#从-cc-switch-迁过来) |
 | 额度预热 | 总开关、错开重置时间、当前状态 |
 | 额度提醒 | 系统通知开关、发送测试提醒 |
@@ -495,6 +503,10 @@ rm -rf "$T"
 ---
 
 ## 版本记录
+
+### 1.4.0（2026-11-26）
+- 新增**显示剩余额度**开关（设置 → 通用，默认关）：打开后面板、菜单栏、桌面小组件、换号建议和系统通知都改成显示还剩多少；告警和推荐账号的时机不变
+- **修正**：切换账号后，切走的账号可能马上变成很久以前的读数（比如已用 98% 显示成 0%），要手动刷新才恢复。现在它最后读到的额度会跟着账号走，切换后两个账号都会重新读一次
 
 ### 1.3.2（2026-11-25）
 稳定性修复，界面没有变化。

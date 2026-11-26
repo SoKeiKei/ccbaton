@@ -45,13 +45,15 @@ struct SwitchBadge: View {
 /// 上下两行的小进度条：上面是标题和百分比，下面是条
 struct StackMeter: View {
     let title: String
-    let value: Double?
+    let value: Double?        // 已用百分比
+    let remaining: Bool
     var body: some View {
+        let shown = quotaShown(value, remaining: remaining)
         VStack(spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title).font(.system(size: 10)).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
-                Text(value.map { "\(Int($0))%" } ?? "—")
+                Text(quotaText(value, remaining: remaining))
                     .font(.system(size: 12, weight: .semibold, design: .rounded)).monospacedDigit()
                     .foregroundStyle((value ?? 0) >= 80 ? levelColor(value) : .primary)
             }
@@ -59,8 +61,8 @@ struct StackMeter: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.13))
                     Capsule().fill(levelColor(value))
-                        .frame(width: max(value == nil ? 0 : 4, g.size.width * CGFloat(min(max(value ?? 0, 0), 100) / 100)))
-                        .animation(.easeOut(duration: 0.7), value: value)
+                        .frame(width: max(value == nil ? 0 : 4, g.size.width * CGFloat(min(max(shown ?? 0, 0), 100) / 100)))
+                        .animation(.easeOut(duration: 0.7), value: shown)
                 }
             }.frame(height: 5)
         }
@@ -72,24 +74,26 @@ struct StackMeter: View {
 struct DualRing: View {
     let five: Double?
     let seven: Double?
+    let remaining: Bool
     var body: some View {
         ZStack {
             ringLayer(value: five, diameter: 78, width: 8)
             ringLayer(value: seven, diameter: 55, width: 8)
             VStack(spacing: 0) {
-                Text(five.map { "\(Int($0))%" } ?? "—")
+                Text(quotaText(five, remaining: remaining))
                     .font(.system(size: 18, weight: .semibold, design: .rounded)).monospacedDigit()
-                Text("5 小时").font(.system(size: 9)).foregroundStyle(.secondary)
+                Text(remaining ? "5时剩余" : "5 小时").font(.system(size: 9)).foregroundStyle(.secondary)
             }
         }
     }
     func ringLayer(value: Double?, diameter: CGFloat, width: CGFloat) -> some View {
-        ZStack {
+        let shown = quotaShown(value, remaining: remaining)
+        return ZStack {
             Circle().stroke(Color.primary.opacity(0.13), lineWidth: width)
-            Circle().trim(from: 0, to: CGFloat(min(max(value ?? 0, 0), 100)) / 100)
+            Circle().trim(from: 0, to: CGFloat(min(max(shown ?? 0, 0), 100)) / 100)
                 .stroke(levelColor(value), style: StrokeStyle(lineWidth: width, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.8), value: value)
+                .animation(.easeOut(duration: 0.8), value: shown)
         }.frame(width: diameter, height: diameter)
     }
 }
@@ -153,6 +157,7 @@ struct WidgetView: View {
         HStack(spacing: 5) {
             Image(systemName: "arrow.left.arrow.right.circle.fill").font(.system(size: pt + 1, weight: .semibold)).foregroundStyle(Color.accentColor)
             Text("CCBaton").font(.system(size: pt, weight: .bold))
+            if model.showRemaining { Text("剩余额度").font(.system(size: pt - 2, weight: .medium)).foregroundStyle(.secondary).lineLimit(1) }
             Spacer(minLength: 4)
             if model.switching {
                 ProgressView().controlSize(.mini)
@@ -183,10 +188,10 @@ struct WidgetView: View {
                 if let r = a.flatMap({ model.renewal($0) }) { renewalLabel(r) }
             }
             Spacer(minLength: 0)
-            DualRing(five: st?.fiveHour, seven: st?.sevenDay)
+            DualRing(five: st?.fiveHour, seven: st?.sevenDay, remaining: model.showRemaining)
             Spacer(minLength: 0)
             HStack(spacing: 6) {
-                Text("7 天 \(st?.sevenDay.map { "\(Int($0))%" } ?? "—")").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("7 天 \(quotaText(st?.sevenDay, remaining: model.showRemaining))").font(.system(size: 10)).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 ForEach(others.shown) { o in
                     let os = model.states[o.id] ?? AccountState()
@@ -259,8 +264,8 @@ struct WidgetView: View {
             }
             .frame(width: 70, alignment: .leading)
             if st.loggedIn {
-                StackMeter(title: "5 小时", value: st.fiveHour)
-                StackMeter(title: "7 天", value: st.sevenDay)
+                StackMeter(title: "5 小时", value: st.fiveHour, remaining: model.showRemaining)
+                StackMeter(title: "7 天", value: st.sevenDay, remaining: model.showRemaining)
             } else {
                 Text("登录已失效，需要重新登录").font(.system(size: 10)).foregroundStyle(.orange)
                 Spacer(minLength: 0)
@@ -318,8 +323,8 @@ struct WidgetView: View {
                 }
                 if st.loggedIn {
                     HStack(spacing: 6) {
-                        MiniMeter(title: "5时", value: st.fiveHour)
-                        MiniMeter(title: "7天", value: st.sevenDay)
+                        MiniMeter(title: "5时", value: st.fiveHour, remaining: model.showRemaining)
+                        MiniMeter(title: "7天", value: st.sevenDay, remaining: model.showRemaining)
                     }
                 } else {
                     Text("需要重新登录").font(.system(size: 9)).foregroundStyle(.orange)
@@ -349,8 +354,8 @@ struct WidgetView: View {
                             }
                             if st.loggedIn {
                                 HStack(alignment: .top, spacing: 16) {
-                                    Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset, idle: st.fiveIdle)
-                                    Meter(title: "7 天", value: st.sevenDay, reset: st.sevenReset)
+                                    Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset, idle: st.fiveIdle, remaining: model.showRemaining)
+                                    Meter(title: "7 天", value: st.sevenDay, reset: st.sevenReset, remaining: model.showRemaining)
                                 }
                             } else {
                                 Text("登录已失效，需要重新登录").font(.system(size: 11)).foregroundStyle(.orange)

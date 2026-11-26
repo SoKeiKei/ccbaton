@@ -281,7 +281,37 @@ func readProfile(_ path: String) -> [String: Any]? {
 }
 
 /// 在 Claude Code 的配置锁里改 .claude.json：换 oauthAccount（nil 是删掉）、删账号缓存，其余不碰。
-func writeProfile(_ path: String, account: [String: Any]?) throws {
+/// usage 是这个账号自己的额度缓存，给了就带过去，换号后不用等重新读。
+func writeProfile(_ path: String, account: [String: Any]?, usage: Any? = nil) throws {
+    try editProfile(path) { doc in
+        if let a = account { doc["oauthAccount"] = a } else { doc.removeValue(forKey: "oauthAccount") }
+        for k in accountCacheKeys { doc.removeValue(forKey: k) }
+        if let u = ownUsage(usage, of: doc) { doc["cachedUsageUtilization"] = u }
+        if doc["hasCompletedOnboarding"] == nil { doc["hasCompletedOnboarding"] = true }
+        return true
+    }
+}
+
+/// 额度缓存是这份资料里这个账号的才返回
+func ownUsage(_ usage: Any?, of doc: [String: Any]) -> [String: Any]? {
+    guard let u = usage as? [String: Any], let acc = doc["oauthAccount"] as? [String: Any] else { return nil }
+    if let id = u["accountUuid"] as? String, id != acc["accountUuid"] as? String { return nil }
+    return u
+}
+func usageTime(_ usage: Any?) -> Double { ((usage as? [String: Any])?["fetchedAtMs"] as? NSNumber)?.doubleValue ?? 0 }
+
+/// 账号在用时，额度缓存只更新在默认的 .claude.json 里。切走时抄回它自己的目录，不然界面会退回到目录里很久以前的读数。
+func keepUsage(from source: [String: Any]?, in path: String) throws {
+    try editProfile(path) { doc in
+        guard let u = ownUsage(source?["cachedUsageUtilization"], of: doc),
+              usageTime(u) > usageTime(ownUsage(doc["cachedUsageUtilization"], of: doc)) else { return false }
+        doc["cachedUsageUtilization"] = u
+        return true
+    }
+}
+
+/// 加锁读出 .claude.json，change 返回 true 才写回去
+private func editProfile(_ path: String, _ change: (inout [String: Any]) -> Bool) throws {
     let lock = try CcLock(path: path + ".lock", stale: 10, wait: 8)
     defer { lock.release() }
     var doc: [String: Any]
@@ -291,9 +321,7 @@ func writeProfile(_ path: String, account: [String: Any]?) throws {
         }
         doc = parsed
     } else { doc = [:] }
-    if let a = account { doc["oauthAccount"] = a } else { doc.removeValue(forKey: "oauthAccount") }
-    for k in accountCacheKeys { doc.removeValue(forKey: k) }
-    if doc["hasCompletedOnboarding"] == nil { doc["hasCompletedOnboarding"] = true }
+    guard change(&doc) else { return }
     let data = try JSONSerialization.data(withJSONObject: doc, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
     let tmp = path + ".cab-tmp"
     try data.write(to: URL(fileURLWithPath: tmp))
@@ -479,6 +507,8 @@ struct Switcher {
         if dirOwner?.key != owner, let acc = liveProfile?["oauthAccount"] as? [String: Any] {
             try writeProfile(slot.globalConfig, account: acc)
         }
+        // 额度缓存只影响显示，抄不过去也不拦着切换
+        do { try keepUsage(from: liveProfile, in: slot.globalConfig) } catch { NSLog("CCBaton: 没能保存切走账号的额度缓存: \(error)") }
         let lock = try storageLock(slot)
         defer { lock.release() }
         let existing = try store.read(slot)
@@ -495,7 +525,7 @@ struct Switcher {
         var acc = (targetProfile["oauthAccount"] as? [String: Any]) ?? [:]
         if !acc.isEmpty {
             acc["profileFetchedAt"] = Int64(Date().timeIntervalSince1970 * 1000)
-            try writeProfile(Slot.defaultSlot.globalConfig, account: acc)
+            try writeProfile(Slot.defaultSlot.globalConfig, account: acc, usage: targetProfile["cachedUsageUtilization"])
         }
         // 用的是备份时，备份里那份现在就在默认槽位
         let bk = backupSlot(j.targetDir)

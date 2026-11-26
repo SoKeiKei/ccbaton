@@ -8,6 +8,23 @@ func levelColor(_ v: Double?) -> Color {
     return v >= 95 ? .red : (v >= 80 ? .orange : .accentColor)
 }
 
+// 额度可以按"已用"（默认）或"剩余"显示。程序里一律按已用来存和判断（颜色、告警、推荐都不变），只在显示时换算。
+
+/// 界面上的数字和进度条长度。剩余按取整后的已用来算，两种显示加起来正好是 100
+func quotaShown(_ used: Double?, remaining: Bool) -> Double? {
+    guard let used, remaining else { return used }
+    return Double(max(0, 100 - Int(used)))
+}
+
+func quotaText(_ used: Double?, remaining: Bool) -> String {
+    quotaShown(used, remaining: remaining).map { "\(Int($0))%" } ?? "—"
+}
+
+/// 句子里用的说法："已用 42%" 或 "剩 58%"
+func quotaWords(_ used: Double, remaining: Bool) -> String {
+    (remaining ? "剩 " : "已用 ") + quotaText(used, remaining: remaining)
+}
+
 func resetText(_ d: Date?) -> String {
     guard let d else { return "" }
     let s = d.timeIntervalSinceNow
@@ -27,7 +44,7 @@ func agoText(_ d: Date?) -> String {
 // MARK: - 菜单栏图标：外圈 5 小时、内圈 7 天
 
 /// 正常时用模板图（系统自动适配深浅色菜单栏）；吃紧（alert=1）或告急（alert=2）时用彩色，并在外圈加一层淡淡的光晕。
-func ringIcon(five: Double?, seven: Double?, alert: Int, size: CGFloat = 18) -> NSImage {
+func ringIcon(five: Double?, seven: Double?, alert: Int, remaining: Bool = false, size: CGFloat = 18) -> NSImage {
     let hot = alert > 0
     let canvas = size + 6                       // 留出光晕的位置；大小固定，菜单栏图标不会因告警而跳动
     let img = NSImage(size: NSSize(width: canvas, height: canvas), flipped: false) { rect in
@@ -60,7 +77,7 @@ func ringIcon(five: Double?, seven: Double?, alert: Int, size: CGFloat = 18) -> 
             track.lineWidth = lw
             (hot ? NSColor.gray.withAlphaComponent(0.45) : NSColor.black.withAlphaComponent(0.28)).setStroke()
             track.stroke()
-            guard let v = value, v > 0 else { return }
+            guard let v = quotaShown(value, remaining: remaining), v > 0 else { return }
             let arc = NSBezierPath()
             arc.appendArc(withCenter: c, radius: radius, startAngle: 90,
                           endAngle: 90 - CGFloat(min(v, 100)) / 100 * 360, clockwise: true)
@@ -82,8 +99,8 @@ struct BarLabel: View {
     var body: some View {
         let st = model.live.flatMap { model.states[$0.id] }
         HStack(spacing: 4) {
-            Image(nsImage: ringIcon(five: st?.fiveHour, seven: st?.sevenDay, alert: st?.level ?? 0))
-            if let f = st?.fiveHour { Text("\(Int(f))%").monospacedDigit() }
+            Image(nsImage: ringIcon(five: st?.fiveHour, seven: st?.sevenDay, alert: st?.level ?? 0, remaining: model.showRemaining))
+            if let f = st?.fiveHour { Text(quotaText(f, remaining: model.showRemaining)).monospacedDigit() }
         }
     }
 }
@@ -92,15 +109,17 @@ struct BarLabel: View {
 
 struct Meter: View {
     let title: String
-    let value: Double?
+    let value: Double?        // 已用百分比
     let reset: Date?
     var idle = false          // 5 小时窗口还没开始计时
+    let remaining: Bool       // 显示剩余额度
     var body: some View {
+        let shown = quotaShown(value, remaining: remaining)
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
-                Text(title).font(.caption).foregroundStyle(.secondary)
+                Text(remaining ? title + "剩余" : title).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text(value.map { "\(Int($0))%" } ?? "—")
+                Text(quotaText(value, remaining: remaining))
                     .font(.system(size: 15, weight: .semibold, design: .rounded)).monospacedDigit()
                     .foregroundStyle((value ?? 0) >= 80 ? levelColor(value) : .primary)
             }
@@ -108,8 +127,8 @@ struct Meter: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.10))
                     Capsule().fill(levelColor(value))
-                        .frame(width: max(value == nil ? 0 : 5, g.size.width * CGFloat(min(max(value ?? 0, 0), 100) / 100)))
-                        .animation(.easeOut(duration: 0.7), value: value)
+                        .frame(width: max(value == nil ? 0 : 5, g.size.width * CGFloat(min(max(shown ?? 0, 0), 100) / 100)))
+                        .animation(.easeOut(duration: 0.7), value: shown)
                 }
             }.frame(height: 5)
             Text(value == nil ? "暂无数据" : (idle ? "未开始计时" : resetText(reset)))
@@ -178,8 +197,8 @@ struct AccountCard: View {
             }
             if st.loggedIn {
                 HStack(alignment: .top, spacing: 14) {
-                    Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset, idle: st.fiveIdle)
-                    Meter(title: "7 天", value: st.sevenDay, reset: st.sevenReset)
+                    Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset, idle: st.fiveIdle, remaining: model.showRemaining)
+                    Meter(title: "7 天", value: st.sevenDay, reset: st.sevenReset, remaining: model.showRemaining)
                 }
             } else {
                 Label("登录已失效或还没登录，点右上角「重新登录」，授权完成后点刷新", systemImage: "exclamationmark.circle")
@@ -238,6 +257,7 @@ struct MenuView: View {
             HStack {
                 Image(systemName: "arrow.left.arrow.right.circle.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.accentColor)
                 Text("CCBaton").font(.system(size: 15, weight: .bold))
+                if model.showRemaining { Tag(text: "剩余额度") }
                 Spacer()
                 Text(agoText(newest)).font(.caption2).foregroundStyle(.tertiary)
                 Button {
@@ -464,6 +484,30 @@ func renderReadmeShots(to dir: String) {
     renderPNG(popover(dark: true), dark: true, path: dir + "/panel-dark.png")
     renderPNG(popover(dark: false), dark: false, path: dir + "/panel-light.png")
 
+    // 同样的数据换成显示剩余额度：面板和中号小组件
+    model.store.showRemaining = true         // 只改内存里的，不保存
+    struct Remaining: View {
+        @ObservedObject var model: Model
+        let wall: LinearGradient
+        var body: some View {
+            HStack(alignment: .top, spacing: 18) {
+                MenuView(model: model)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
+                    .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
+                VStack(spacing: 4) {
+                    ForEach([WidgetSize.small, .medium], id: \.self) { s in
+                        WidgetView(model: model, forceSize: s).frame(width: s.width, height: s.height)
+                    }
+                }
+            }
+            .padding(30).background(wall)
+        }
+    }
+    renderPNG(Remaining(model: model, wall: wall), dark: true, path: dir + "/remaining.png")
+    model.store.showRemaining = false
+
     // 设置窗口
     model.store.widgetVisible = true         // 只改内存里的，不保存
     model.store.widgetSize = "medium"
@@ -508,7 +552,7 @@ func renderReadmeShots(to dir: String) {
 
     // 软件更新：面板右下角的红点，和设置里发现新版时的样子
     applyDemo(model)
-    model.store.updateRelease = AppRelease(version: "1.4.0", page: releasesPageURL, zip: releasesPageURL, signature: releasesPageURL)
+    model.store.updateRelease = AppRelease(version: "1.5.0", page: releasesPageURL, zip: releasesPageURL, signature: releasesPageURL)
     renderPNG(popover(dark: true), dark: true, path: dir + "/panel-update.png")
     renderPNG(UpdateSettings(model: model).padding(20).frame(width: 420).background(Color(nsColor: .windowBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(wall),
@@ -773,6 +817,18 @@ struct ClaudeAccountBarApp: App {
             check("没在用的账号用量再高也不弹", run(st(10, live: true), b: st(99)).isEmpty)
             check("其他账号都不宽裕时，建议里不乱推荐", run(st(92, live: true), b: st(80), c: st(75)).first?.body.contains("不太宽裕") == true)
             check("7 天窗口到 91% 也会提醒", run(st(10, seven: 91, live: true)).first?.title.contains("7 天") == true)
+            check("默认显示已用", quotaText(98, remaining: false) == "98%" && quotaText(nil, remaining: false) == "—")
+            check("剩余显示：98% 已用是剩 2%，没读到仍是 —", quotaText(98, remaining: true) == "2%" && quotaText(nil, remaining: true) == "—")
+            check("两种显示取整后加起来是 100", [0, 0.4, 41.7, 99.6, 100].allSatisfy { Int(quotaShown($0, remaining: false)!) + Int(quotaShown($0, remaining: true)!) == 100 })
+            check("用超过 100% 时剩余是 0，不出负数", quotaText(103, remaining: true) == "0%")
+            let left = alertsToFire(accounts: accs, states: ["a": st(92, live: true), "b": st(10), "c": st(20)], alerted: [], name: { $0.label }, remaining: true)
+            check("剩余模式：通知说剩 8%，建议的号说剩 90%", left.first?.title.contains("剩 8%") == true && left.first?.body.contains("剩 90%") == true)
+            check("剩余模式：提醒时机和记号不变", left.first?.keys == r92.first?.keys)
+            var saved = Store(accounts: [], workDir: "/x")
+            func reread(_ s: Store) -> Store? { (try? JSONEncoder().encode(s)).flatMap { try? JSONDecoder().decode(Store.self, from: $0) } }
+            check("没设过开关的旧设置文件：默认已用", reread(saved)?.showRemaining == nil)
+            saved.showRemaining = true
+            check("开关能存下来", reread(saved)?.showRemaining == true)
             print(failed == 0 ? "\n全部通过" : "\n有 \(failed) 项失败")
             exit(failed == 0 ? 0 : 1)
         }

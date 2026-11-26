@@ -73,7 +73,7 @@ struct AlertItem {
 /// 只看"正在使用"的账号：某个窗口用量到 90% 提醒一次，用完（100%）再提醒一次。
 /// 同一个重置周期内不重复；读数已过重置时间（旧缓存）不提醒；一次跳过两档只弹最高的那条。
 func alertsToFire(accounts: [Account], states: [String: AccountState], alerted: Set<String>,
-                  name: (Account) -> String, now: Date = Date()) -> [AlertItem] {
+                  name: (Account) -> String, remaining: Bool = false, now: Date = Date()) -> [AlertItem] {
     guard let live = accounts.first(where: { states[$0.id]?.live == true }), let st = states[live.id] else { return [] }
     var items: [AlertItem] = []
     for (label, value, reset) in [("5 小时", st.fiveHour, st.fiveReset), ("7 天", st.sevenDay, st.sevenReset)] {
@@ -87,8 +87,8 @@ func alertsToFire(accounts: [Account], states: [String: AccountState], alerted: 
         // 找一个还有空的账号当建议（和面板上的"推荐"同一个规则）
         let better = recommendedAccount(accounts: accounts, states: states, now: now)
         let resetLine = reset.map { resetText($0) } ?? ""
-        let suggest = better.map { "「\(name($0.account))」还有空（已用 \(Int($0.used))%），可以在 CCBaton 里一键切换。" } ?? "其他账号也不太宽裕，注意节省。"
-        let title = top >= 100 ? "\(name(live)) 的\(label)额度已用完" : "\(name(live)) 的\(label)额度快用完了（\(Int(v))%）"
+        let suggest = better.map { "「\(name($0.account))」还有空（\(quotaWords($0.used, remaining: remaining))），可以在 CCBaton 里一键切换。" } ?? "其他账号也不太宽裕，注意节省。"
+        let title = top >= 100 ? "\(name(live)) 的\(label)额度已用完" : "\(name(live)) 的\(label)额度快用完了（\(remaining ? "剩 " : "")\(quotaText(v, remaining: remaining))）"
         items.append(AlertItem(keys: keys, title: title, body: [resetLine, suggest].filter { !$0.isEmpty }.joined(separator: "，")))
     }
     return items

@@ -63,6 +63,7 @@ struct Store: Codable {
     var autoUpdateCheck: Bool?                   // 自动检查更新，默认开
     var updateCheckedAt: Date?                   // 上次查到版本信息的时间
     var updateRelease: AppRelease?               // 查到的新版本（有它就在版本号前显示红点）
+    var showRemaining: Bool?                     // 界面显示剩余额度而不是已用额度，默认关
 
     init(accounts: [Account], workDir: String) { self.accounts = accounts; self.workDir = workDir }
 
@@ -70,7 +71,7 @@ struct Store: Codable {
     private struct Legacy: Codable { var id: String; var label: String; var configDir: String?; var renewalDay: Int?; var note: String? }
     private enum K: String, CodingKey {
         case accounts, workDir, widgetVisible, widgetOrigin, widgetSize, alertsEnabled, alerted, warmupEnabled, warmupStagger, warmupRecords
-        case recentDirs, terminalPrefs, terminalKept, colorSlots, autoUpdateCheck, updateCheckedAt, updateRelease
+        case recentDirs, terminalPrefs, terminalKept, colorSlots, autoUpdateCheck, updateCheckedAt, updateRelease, showRemaining
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -97,6 +98,7 @@ struct Store: Codable {
         autoUpdateCheck = try? c.decode(Bool.self, forKey: .autoUpdateCheck)
         updateCheckedAt = try? c.decode(Date.self, forKey: .updateCheckedAt)
         updateRelease = try? c.decode(AppRelease.self, forKey: .updateRelease)
+        showRemaining = try? c.decode(Bool.self, forKey: .showRemaining)
     }
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: K.self)
@@ -117,6 +119,7 @@ struct Store: Codable {
         try c.encodeIfPresent(autoUpdateCheck, forKey: .autoUpdateCheck)
         try c.encodeIfPresent(updateCheckedAt, forKey: .updateCheckedAt)
         try c.encodeIfPresent(updateRelease, forKey: .updateRelease)
+        try c.encodeIfPresent(showRemaining, forKey: .showRemaining)
     }
 }
 
@@ -536,13 +539,16 @@ final class Model: ObservableObject {
         checkAlerts()
     }
 
+    var showRemaining: Bool { store.showRemaining ?? false }
+    func setShowRemaining(_ on: Bool) { store.showRemaining = on; save() }
+
     var alertsOn: Bool { store.alertsEnabled ?? true }
 
     /// 额度告急时弹系统通知（只对正在使用的账号，每个重置周期最多两次）
     func checkAlerts() {
         guard alertsOn, Alerter.enabled else { return }
         var done = Set(store.alerted ?? [])
-        let items = alertsToFire(accounts: store.accounts, states: states, alerted: done, name: { self.shortDisplayName($0) })
+        let items = alertsToFire(accounts: store.accounts, states: states, alerted: done, name: { self.shortDisplayName($0) }, remaining: showRemaining)
         guard !items.isEmpty else { return }
         for it in items {
             done.formUnion(it.keys)
@@ -621,7 +627,12 @@ final class Model: ObservableObject {
         Task.detached {
             let sw = Switcher(dirOf: { k in accounts.first { identity(ofDir: $0.configDir)?.key == k }?.configDir })
             let failure: String?
-            do { _ = try sw.checkOut(target: key, targetDir: dir); failure = nil } catch { failure = "\(error)" }
+            var previousKey: String?
+            do {
+                if case .switched(let k) = try sw.checkOut(target: key, targetDir: dir) { previousKey = k }
+                failure = nil
+            } catch { failure = "\(error)" }
+            let previous = previousKey.flatMap { k in accounts.first { identity(ofDir: $0.configDir)?.key == k }?.id }
             await MainActor.run {
                 self.switching = false
                 self.reloadStates()
@@ -632,6 +643,7 @@ final class Model: ObservableObject {
                     self.showToast("已切换到 \(name)")
                     self.notice = "已切换到 \(name)。正在运行的普通 claude 会在下一条消息换成这个号，提示缓存会重建，第一条会慢一点。"
                     self.lastRun[a.id] = nil
+                    if let previous { self.lastRun[previous] = nil }     // 切走的号也马上读一次最新的
                     Task { await self.refreshAll(force: false) }
                 }
             }
