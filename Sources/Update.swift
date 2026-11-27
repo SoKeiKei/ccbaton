@@ -221,6 +221,7 @@ extension Model {
         if switching { return "正在切换账号，几秒后再点" }
         if warming != nil { return "正在预热账号，几秒后再点" }
         if refreshing { return "正在读取额度，几秒后再点" }
+        if desktopFlow != nil { return "正在处理桌面端，几秒后再点" }
         return nil
     }
 
@@ -327,17 +328,30 @@ struct UpdateSettings: View {
         let release = model.availableUpdate
         var failed = false
         if case .failed = model.updatePhase { failed = true }
-        return SettingGroup(title: "软件更新", icon: "arrow.down.circle") {
-            SettingSwitch(title: "自动检查更新", isOn: Binding(get: { model.autoUpdateOn }, set: { model.setAutoUpdate($0) }))
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(status).font(.system(size: 11, weight: release != nil || failed ? .medium : .regular))
-                        .foregroundStyle(failed ? Color.orange : (release != nil ? Color.accentColor : Color.secondary))
-                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    if let r = release, !failed {
-                        Button("查看更新内容") { model.openLink(r.page) }.buttonStyle(.link).font(.system(size: 11))
-                    } else if failed {
-                        Button("打开下载页面") { model.openLink(releasesPageURL) }.buttonStyle(.link).font(.system(size: 11))
+        return FormSection(title: "软件更新", icon: "arrow.down.circle.fill", tint: .green) {
+            FormRow(title: "自动检查更新") {
+                SwitchControl(title: "自动检查更新", isOn: Binding(get: { model.autoUpdateOn }, set: { model.setAutoUpdate($0) }))
+            }
+            RowDivider()
+            HStack(alignment: .center, spacing: 12) {
+                // 出错原因最长两行，下面还可能有一个链接：按最多的情况占好位置（设置窗口大小打开时就定了），
+                // 平时只有一行时在这块里上下居中
+                ZStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("占").font(.system(size: 12)).lineLimit(2, reservesSpace: true)
+                        Button("占") {}.buttonStyle(.link).font(Look.caption)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .hidden().accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(status).font(.system(size: 12, weight: release != nil || failed ? .medium : .regular))
+                            .foregroundStyle(failed ? Color.orange : (release != nil ? Color.accentColor : Color.secondary))
+                            .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                        if let r = release, !failed {
+                            Button("查看更新内容") { model.openLink(r.page) }.buttonStyle(.link).font(Look.caption)
+                        } else if failed {
+                            Button("打开下载页面") { model.openLink(releasesPageURL) }.buttonStyle(.link).font(Look.caption)
+                        }
                     }
                 }
                 Spacer(minLength: 8)
@@ -348,7 +362,7 @@ struct UpdateSettings: View {
                     Button("检查更新") { Task { await model.checkForUpdate(manual: true) } }.controlSize(.small).disabled(busy)
                 }
             }
-            .frame(height: 46, alignment: .top)      // 固定高度：设置窗口大小打开时就定了
+            .padding(.horizontal, Look.rowH).padding(.vertical, Look.rowV)
         }
     }
 }

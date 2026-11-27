@@ -143,6 +143,81 @@ struct Meter: View {
     }
 }
 
+/// 卡片底部一行：这个账号在 Claude 桌面端的状态，以及能做的事（切换 / 登录一次 / 保存）
+struct DesktopRow: View {
+    @ObservedObject var model: Model
+    let account: Account
+    var body: some View {
+        let status = model.desktopStatus(for: account)
+        if status != .hidden {
+            let action = model.desktopAction(for: account)
+            let (text, button): (String, String?) = {
+                switch status {
+                case .active: return ("Claude 桌面端正在用这个账号", nil)
+                case .capture: return ("Claude 桌面端现在登录的就是它，还没保存", "保存")
+                case .switchTo: return ("Claude 桌面端", "换到桌面端")
+                default: return ("Claude 桌面端还没登录过这个账号", "登录一次")
+                }
+            }()
+            HStack(spacing: 6) {
+                Image(systemName: "macwindow").font(.system(size: 11))
+                Text(text).font(.caption).lineLimit(1).minimumScaleFactor(0.85)
+                Spacer(minLength: 4)
+                if let button {
+                    Button(button) { model.desktopButton(account) }
+                        .buttonStyle(.bordered).controlSize(.small).disabled(action == .busy)
+                        .help(desktopTip(status))
+                }
+            }
+            .foregroundStyle(status == .active ? Color.indigo : Color.secondary)
+        }
+    }
+}
+
+func desktopTip(_ status: DesktopAction) -> String {
+    switch status {
+    case .switchTo: return "把 Claude 桌面端换成这个账号（会退出再重开 Claude，正在进行的对话会被打断）"
+    case .capture: return "桌面端现在登录的就是这个账号，保存一下，以后可以一键切换"
+    case .active: return "Claude 桌面端正在用这个账号"
+    default: return "这个账号还没在桌面端登录过：登录一次，之后就能一键切换"
+    }
+}
+
+/// 紧凑行里的桌面端小图标：能做事的是按钮，正在用的亮成靛蓝色
+struct DesktopButton: View {
+    @ObservedObject var model: Model
+    let account: Account
+    var body: some View {
+        let status = model.desktopStatus(for: account)
+        let action = model.desktopAction(for: account)
+        if status == .active {
+            Image(systemName: "macwindow").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.indigo)
+                .frame(width: 18, height: 20).help(desktopTip(.active))
+        } else if status != .hidden {
+            Button { model.desktopButton(account) } label: { Image(systemName: "macwindow").font(.system(size: 12)).frame(width: 18, height: 20).contentShape(Rectangle()) }
+                .buttonStyle(.plain).foregroundStyle(action == .busy ? Color.secondary.opacity(0.4) : Color.secondary)
+                .disabled(action == .busy).help(desktopTip(status))
+        }
+    }
+}
+
+/// 桌面端操作进行中的提示条
+struct DesktopFlowBar: View {
+    @ObservedObject var model: Model
+    var body: some View {
+        if let f = model.desktopFlow {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(f.text).font(.caption).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if f.cancellable { Button("取消并恢复") { model.cancelDesktopLogin() }.controlSize(.small) }
+            }
+            .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.indigo.opacity(0.14)))
+        }
+    }
+}
+
 /// 一个账号的额度条：一般是 5 小时 + 7 天两条；没有 5 小时窗口的 Ultra 只有一条周额度
 struct QuotaMeters: View {
     let st: AccountState
@@ -193,7 +268,7 @@ struct AccountCard: View {
                     HStack(spacing: 5) {
                         if isActive { Tag(text: "使用中", tint: .green) }
                         if !st.plan.isEmpty { Tag(text: st.plan) }
-                        if st.noFiveHour && st.loggedIn { Tag(text: "无 5 小时限制", tint: .teal) }
+                        if st.showsNoFiveHour { Tag(text: "无 5 小时限制", tint: .teal) }
                         if recommended { Tag(text: "推荐", tint: .accentColor) }
                     }
                 }
@@ -218,6 +293,7 @@ struct AccountCard: View {
             }
             if st.loggedIn {
                 QuotaMeters(st: st, remaining: model.showRemaining, spacing: 14)
+                DesktopRow(model: model, account: account)
             } else {
                 Label("登录已失效或还没登录，点右上角「重新登录」，授权完成后点刷新", systemImage: "exclamationmark.circle")
                     .font(.caption).foregroundStyle(.orange)
@@ -233,11 +309,11 @@ struct AccountCard: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(isActive ? Color.green.opacity(0.09) : Color.primary.opacity(0.045))
         )
-        .overlay(
+        .alertGlow(st.level, corner: 12, radius: 9)
+        .overlay(      // 放在光晕后面：在用的账号告急时，绿边仍然画在红光上面
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(isActive ? Color.green.opacity(0.5) : Color.primary.opacity(0.06), lineWidth: isActive ? 1.2 : 0.8)
         )
-        .alertGlow(st.level, corner: 12, radius: 9)
         .animation(.spring(response: 0.45, dampingFraction: 0.8), value: isActive)
         .contextMenu { AccountMenu(model: model, account: account) }
     }
@@ -301,6 +377,8 @@ struct MenuView: View {
                 .padding(8).frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
             }
+
+            DesktopFlowBar(model: model)
 
             AccountList(model: model, shown: shown)
 
@@ -555,20 +633,48 @@ func renderReadmeShots(to dir: String) {
     renderPNG(UltraShot(model: model, wall: wall), dark: true, path: dir + "/ultra.png")
     model.states = beforeUltra
 
+    // 桌面端：d2 是桌面端在用的账号，d1 保存过桌面登录（点"桌面"一键换），d3 还没登录过（点"登录桌面"）
+    model.desktopAvailable = true
+    model.desktopOwnerState = .account(model.store.accounts[1])
+    model.desktopSaved = ["d1", "d2"]
+    struct DesktopShot: View {
+        @ObservedObject var model: Model
+        let wall: LinearGradient
+        var body: some View {
+            HStack(alignment: .top, spacing: 18) {
+                MenuView(model: model)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
+                    .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
+                VStack(spacing: 4) {
+                    ForEach([WidgetSize.small, .medium], id: \.self) { sz in
+                        WidgetView(model: model, forceSize: sz).frame(width: sz.width, height: sz.height)
+                    }
+                }
+            }
+            .padding(30).background(wall)
+        }
+    }
+    renderPNG(DesktopShot(model: model, wall: wall), dark: true, path: dir + "/desktop.png")
+    model.desktopFlow = DesktopFlow(text: "请在桌面端登录 alex.backup@example.com", cancellable: true)
+    renderPNG(DesktopShot(model: model, wall: wall), dark: true, path: dir + "/desktop-login.png")
+    model.desktopFlow = nil
+    model.desktopAvailable = false
+    model.desktopOwnerState = .none
+    model.desktopSaved = []
+
     // 设置窗口
     model.store.widgetVisible = true         // 只改内存里的，不保存
     model.store.widgetSize = "medium"
     model.store.alertsEnabled = true
     func settings(dark: Bool) -> some View {
-        SettingsView(model: model).background(Color(nsColor: .windowBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(dark ? wall : wallLight)
+        ShotWindowFrame(title: "CCBaton 设置") { SettingsView(model: model) }.padding(28).background(dark ? wall : wallLight)
     }
     renderPNG(settings(dark: true), dark: true, path: dir + "/settings.png")
     applyDemo(model)
 
-    renderPNG(TerminalLaunchView(model: model, account: model.store.accounts[1], close: {}).background(Color(nsColor: .windowBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(wall),
+    renderPNG(ShotWindowFrame(title: "打开终端") { TerminalLaunchView(model: model, account: model.store.accounts[1], close: {}) }.padding(28).background(wall),
         dark: true, path: dir + "/terminal.png")
 
     for s in WidgetSize.allCases {
@@ -581,8 +687,7 @@ func renderReadmeShots(to dir: String) {
     model.store.accounts[1].renewalDay = Calendar.current.component(.day, from: Date().addingTimeInterval(2 * 86400))
     model.store.accounts[1].note = "公司报销用，发票每月续期后记得下载。\n登录邮箱的二次验证在手机上。"
     let other = model.store.accounts[1]
-    renderPNG(EditView(model: model, account: other, close: {}).background(Color(nsColor: .windowBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(wall),
+    renderPNG(ShotWindowFrame(title: "编辑账号") { EditView(model: model, account: other, close: {}) }.padding(28).background(wall),
         dark: true, path: dir + "/editor.png")
 
     // 移除账号的确认框（演示一个用"添加账号"加的号，会删登录的那种）
@@ -599,9 +704,9 @@ func renderReadmeShots(to dir: String) {
 
     // 软件更新：面板右下角的红点，和设置里发现新版时的样子
     applyDemo(model)
-    model.store.updateRelease = AppRelease(version: "1.5.0", page: releasesPageURL, zip: releasesPageURL, signature: releasesPageURL)
+    model.store.updateRelease = AppRelease(version: "1.6.0", page: releasesPageURL, zip: releasesPageURL, signature: releasesPageURL)
     renderPNG(popover(dark: true), dark: true, path: dir + "/panel-update.png")
-    renderPNG(UpdateSettings(model: model).padding(20).frame(width: 420).background(Color(nsColor: .windowBackgroundColor))
+    renderPNG(UpdateSettings(model: model).padding(20).frame(width: 440).background(Color(nsColor: .windowBackgroundColor).opacity(0.9))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).shadow(color: .black.opacity(0.3), radius: 14, y: 6).padding(28).background(wall),
         dark: true, path: dir + "/update.png")
 
@@ -793,6 +898,8 @@ struct ClaudeAccountBarApp: App {
         if args.contains("--warmuptest") { exit(MainActor.assumeIsolated { runWarmupTest() }) }
         if args.contains("--terminaltest") { exit(MainActor.assumeIsolated { runTerminalTest() }) }
         if args.contains("--multitest") { exit(MainActor.assumeIsolated { runMultiTest() }) }
+        if args.contains("--desktoptest") { exit(MainActor.assumeIsolated { runDesktopTest() }) }
+        if args.contains("--statusmenutest") { exit(MainActor.assumeIsolated { runStatusMenuTest() }) }
         if args.contains("--migratetest") { exit(MainActor.assumeIsolated { runMigrationTest() }) }
         if args.contains("--updatetest") { exit(MainActor.assumeIsolated { runUpdateTest() }) }
         if args.contains("--robusttest") { exit(MainActor.assumeIsolated { runRobustTest() }) }
@@ -825,7 +932,7 @@ struct ClaudeAccountBarApp: App {
                 check("留空恢复显示邮箱", m.displayName(m.store.accounts[0]) == "real@test.com")
                 AccountEditor.shared.open(m, account: m.store.accounts[0])
                 let w = AccountEditor.shared.window
-                check("编辑窗口打开了，标题和宽度正确", w?.isVisible == true && w?.title == "编辑账号" && abs((w?.contentView?.frame.width ?? 0) - 400) < 1)
+                check("编辑窗口打开了，标题和宽度正确", w?.isVisible == true && w?.title == "编辑账号" && abs((w?.contentView?.frame.width ?? 0) - 440) < 1)
                 w?.close()
             }
             print(failed == 0 ? "\n全部通过" : "\n有 \(failed) 项失败")

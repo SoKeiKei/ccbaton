@@ -51,7 +51,7 @@ struct StackMeter: View {
         let shown = quotaShown(value, remaining: remaining)
         VStack(spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
-                Text(title).font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(remaining ? title + "剩" : title).font(.system(size: 10)).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Text(quotaText(value, remaining: remaining))
                     .font(.system(size: 12, weight: .semibold, design: .rounded)).monospacedDigit()
@@ -152,6 +152,12 @@ struct WidgetView: View {
             }
             Divider()
             Button("刷新额度") { Task { model.reloadStates(); await model.refreshAll(force: true) } }
+            let desktop = model.desktopMenuEntries()
+            if !desktop.isEmpty {
+                Menu("桌面端") {
+                    ForEach(desktop) { e in Button(e.title) { model.desktopButton(e.account) }.disabled(!e.enabled) }
+                }
+            }
             Button("设置…") { SettingsController.shared.open(model) }
             Button("隐藏小组件") { onHide() }
         }
@@ -189,6 +195,7 @@ struct WidgetView: View {
             HStack(spacing: 5) {
                 Circle().fill(Color.green).frame(width: 6, height: 6)
                 Text(a.map { model.shortDisplayName($0) } ?? "CCBaton").font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                if let a { DesktopMark(model: model, account: a) }
                 Spacer(minLength: 0)
                 if let r = a.flatMap({ model.renewal($0) }) { renewalLabel(r) }
             }
@@ -197,14 +204,14 @@ struct WidgetView: View {
             Spacer(minLength: 0)
             HStack(spacing: 6) {
                 Group {
-                    if st?.noFiveHour ?? false {
+                    if st?.showsNoFiveHour ?? false {
                         ViewThatFits(in: .horizontal) {      // 右边头像多的时候放不下，换短一点的说法
                             Text("无 5 小时限制")
                             Text("无 5 时限制")
                             Text("仅周额度")
                         }
                     } else {
-                        Text("7 天 \(quotaText(st?.sevenDay, remaining: model.showRemaining))")
+                        Text("7 天\(model.showRemaining ? "剩" : "") \(quotaText(st?.sevenDay, remaining: model.showRemaining))")
                     }
                 }
                 .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
@@ -217,6 +224,7 @@ struct WidgetView: View {
                             .frame(width: 22, height: 22)
                             .background(Circle().fill(os.loggedIn ? model.avatarColor(of: o) : Color.gray.opacity(0.5)))
                             .overlay(alignment: .topTrailing) { if model.renewal(o) != nil { renewalDot } }
+                            .overlay(alignment: .bottomTrailing) { DesktopMark(model: model, account: o, dot: true) }
                     }
                     .buttonStyle(.plain).help("切换到 \(model.shortDisplayName(o))" + (model.renewal(o).map { "（\($0.text)）" } ?? ""))
                 }
@@ -275,7 +283,10 @@ struct WidgetView: View {
         return HStack(spacing: 9) {
             SwitchBadge(live: st.live, usable: usable(st), size: badge) { onSwitch(a) }
             VStack(alignment: .leading, spacing: 1) {
-                Text(model.shortDisplayName(a)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                HStack(spacing: 3) {
+                    Text(model.shortDisplayName(a)).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    DesktopMark(model: model, account: a)
+                }
                 subtitle(a, st, size: 9)
             }
             .frame(width: 70, alignment: .leading)
@@ -334,6 +345,7 @@ struct WidgetView: View {
                 HStack(spacing: 4) {
                     Text(model.shortDisplayName(a)).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                         .foregroundStyle(st.live ? Color.green : Color.primary)
+                    DesktopMark(model: model, account: a)
                     Spacer(minLength: 0)
                     if let r = model.renewal(a) { renewalLabel(r) }
                 }
@@ -363,7 +375,10 @@ struct WidgetView: View {
                             HStack(spacing: 9) {
                                 SwitchBadge(live: st.live, usable: usable(st), size: 28) { onSwitch(a) }
                                 VStack(alignment: .leading, spacing: 1) {
-                                    Text(model.shortDisplayName(a)).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                                    HStack(spacing: 4) {
+                                        Text(model.shortDisplayName(a)).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                                        DesktopMark(model: model, account: a)
+                                    }
                                     subtitle(a, st, size: 10)
                                 }
                                 Spacer(minLength: 0)

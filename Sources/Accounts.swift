@@ -153,7 +153,8 @@ struct Avatar: View {
     }
 }
 
-/// 窄的小进度条：左边标题，右边百分数，下面一条
+/// 窄的小进度条：左边标题，右边百分数，下面一条。
+/// 紧凑列表里一条只有 54pt 宽，"5时剩 100%" 放不下，所以这里不加"剩"字；面板和小组件的头部有"剩余额度"标签。
 struct MiniMeter: View {
     let title: String
     let value: Double?        // 已用百分比
@@ -221,12 +222,13 @@ struct AccountRow: View {
                 Text(detail).font(.system(size: 9, weight: model.renewal(account) == nil ? .regular : .semibold)).lineLimit(1).minimumScaleFactor(0.8)
                     .foregroundStyle(st.loggedIn && model.renewal(account) == nil ? Color.secondary : Color.orange)
             }
-            .frame(width: 86, alignment: .leading)
+            .frame(width: 76, alignment: .leading)
             .help(tip)
             if st.loggedIn {
                 if !st.noFiveHour { MiniMeter(title: "5时", value: st.fiveHour, remaining: model.showRemaining) }
                 MiniMeter(title: "7天", value: st.sevenDay, remaining: model.showRemaining)
                 HStack(spacing: 5) {
+                    DesktopButton(model: model, account: account)
                     Button { model.switchTo(account) } label: { Image(systemName: "arrow.left.arrow.right").frame(width: 13, height: 13) }
                         .buttonStyle(.borderedProminent).controlSize(.small).disabled(model.switching).help("切换到这个账号")
                     Button { TerminalController.shared.open(model, account: account) } label: { Image(systemName: "terminal").frame(width: 13, height: 13) }

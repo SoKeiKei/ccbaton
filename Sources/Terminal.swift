@@ -211,49 +211,53 @@ struct TerminalLaunchView: View {
 
     var body: some View {
         let name = model.shortDisplayName(account)
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("在哪个目录打开终端？").font(.system(size: 15, weight: .bold))
-                Text("用「\(name)」的登录启动 Claude Code。一般选你的项目文件夹。")
-                    .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Avatar(model: model, account: account, size: 34)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("在哪个目录打开终端？").font(.system(size: 15, weight: .bold))
+                    Text("用「\(name)」的登录启动 Claude Code。一般选你的项目文件夹。")
+                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
             }
 
+            // 隔离说明：颜色跟着状态走（绿 = 固定在这个账号，橙 = 会跟着换号或打不开）
             let (icon, tint, title, detail) = explanation(name)
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: icon).font(.system(size: 13)).foregroundStyle(tint)
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon).font(.system(size: 13, weight: .semibold)).foregroundStyle(tint)
+                    .frame(width: 26, height: 26).background(Circle().fill(tint.opacity(0.16)))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true).frame(height: 28, alignment: .topLeading)
-                    Toggle(isOn: $independent) { Text("要完全独立（这个账号多登录一次）").font(.system(size: 11)) }
+                    Text(title).font(.system(size: 12.5, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                    ReservedText(text: detail, lines: 2)
+                    Toggle(isOn: $independent) { Text("要完全独立（这个账号多登录一次）").font(Look.caption) }
                         .toggleStyle(.checkbox).frame(height: 16)
                         .opacity(mode == .dedicated || managed ? 0 : 1).disabled(mode == .dedicated || managed)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(10)
-            .frame(height: 92, alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.06)))
+            .padding(12)
+            .card(tint: tint)
 
-            HStack(spacing: 8) {
-                HStack(spacing: 10) {
-                    Image(systemName: missing ? "folder.badge.questionmark" : "folder").font(.system(size: 15)).foregroundStyle(missing ? Color.orange : Color.secondary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(folderName(prefs.dir)).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                        Text(missing ? "找不到这个目录（外接盘没插上？）" : parentName(prefs.dir))
-                            .font(.system(size: 11)).foregroundStyle(missing ? Color.orange : Color.secondary).lineLimit(1).truncationMode(.middle)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    HStack(spacing: 10) {
+                        Image(systemName: missing ? "folder.badge.questionmark" : "folder.fill").font(.system(size: 16))
+                            .foregroundStyle(missing ? Color.orange : Color.accentColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(folderName(prefs.dir)).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                            Text(missing ? "找不到这个目录（外接盘没插上？）" : parentName(prefs.dir))
+                                .font(Look.caption).foregroundStyle(missing ? Color.orange : Color.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
+                    .padding(.horizontal, 12)
+                    .frame(height: 48)
+                    .card(tint: missing ? .orange : .accentColor, radius: 10)
+                    .help(prefs.dir)
+                    Button("更换…") { pickDirectory(prefs.dir) { prefs.dir = $0; error = "" } }
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 46)
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
-                .help(prefs.dir)
-                Button("更换…") { pickDirectory(prefs.dir) { prefs.dir = $0; error = "" } }
-            }
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text("最近用过").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                Text("最近用过").font(Look.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.leading, 2).padding(.top, 2)
                 ScrollView {
                     VStack(spacing: 2) {
                         ForEach(model.recentDirs, id: \.self) { d in
@@ -261,50 +265,57 @@ struct TerminalLaunchView: View {
                                       pick: { prefs.dir = d; error = "" }, remove: { model.removeRecent(d) })
                         }
                         if model.recentDirs.isEmpty {
-                            Text("还没有记录，开过一次终端就会出现在这里。").font(.system(size: 11)).foregroundStyle(.tertiary)
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
+                            Text("还没有记录，开过一次终端就会出现在这里。").font(Look.caption).foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6).padding(.horizontal, 8)
                         }
                     }
+                    .padding(4)
                 }
                 .frame(height: 148)
+                .card(radius: 10)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: $prefs.skipPermissions) {
-                    HStack(spacing: 6) {
-                        Text("跳过权限确认").font(.system(size: 12))
-                        Text("--dangerously-skip-permissions").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+            // 启动选项：和设置窗口同一种卡片
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("跳过权限确认").font(Look.title)
+                            Text("--dangerously-skip-permissions").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        SwitchControl(title: "跳过权限确认", isOn: $prefs.skipPermissions)
                     }
+                    // 打开开关后才出现的提醒：始终占一行
+                    ReservedText(text: prefs.skipPermissions ? "Claude 改文件、执行命令都不会再问你，只在信得过的目录里用。" : "", color: .orange)
                 }
-                .toggleStyle(.checkbox)
-                .frame(height: 18)
-                Text(prefs.skipPermissions ? "Claude 改文件、执行命令都不会再问你，只在信得过的目录里用。" : " ")
-                    .font(.system(size: 11)).foregroundStyle(.orange).lineLimit(1)
+                .padding(.horizontal, Look.rowH).padding(.top, Look.rowV).padding(.bottom, 6)
+                RowDivider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("附加参数（可选）").font(Look.title)
+                    TextField("例如 --continue 或 --model opus", text: $prefs.args)
+                        .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced))
+                        .frame(height: 22)
+                        .autocorrectionDisabled()
+                        .onChange(of: prefs.args) { error = "" }
+                    ReservedText(text: badArgs ? "引号没有配对，补上才能打开。" : "接在启动命令后面。用空格分隔，含空格的值用引号括起来。",
+                                 color: badArgs ? .orange : .secondary)
+                }
+                .padding(.horizontal, Look.rowH).padding(.vertical, Look.rowV)
             }
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("附加参数（可选）").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                TextField("例如 --continue 或 --model opus", text: $prefs.args)
-                    .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced))
-                    .frame(height: 22)
-                    .autocorrectionDisabled()
-                    .onChange(of: prefs.args) { error = "" }
-                Text(badArgs ? "引号没有配对，补上才能打开。" : "接在启动命令后面。用空格分隔，含空格的值用引号括起来。")
-                    .font(.system(size: 11)).foregroundStyle(badArgs ? Color.orange : Color.secondary).lineLimit(1)
-            }
+            .card()
 
             HStack {
-                Text(error).font(.system(size: 11)).foregroundStyle(.orange).lineLimit(2)
+                ReservedText(text: error, lines: 2, color: .orange)
                 Spacer(minLength: 8)
                 Button("取消") { close() }.keyboardShortcut(.cancelAction)
                 Button(needsLogin ? "登录并打开" : "打开终端") { open() }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                     .disabled(badArgs || missing || managed || (mode == nil && !independent))
             }
-            .frame(height: 28)
         }
-        .padding(20)
-        .frame(width: 440)
+        .padding(.horizontal, Look.pad).padding(.top, 4).padding(.bottom, 16)
+        .frame(width: 460)
     }
 }
 
@@ -362,21 +373,7 @@ final class TerminalController {
             guard let w = self?.window else { return }
             panel.beginSheetModal(for: w) { r in if r == .OK, let u = panel.url { done(u.path) } }
         })
-        let host = NSHostingView(rootView: view)
-        let size = host.fittingSize
-        host.sizingOptions = []                  // 窗口大小固定，不让内容的布局反过来牵着窗口走
-        let w = NSWindow(contentRect: NSRect(origin: .zero, size: size),
-                         styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        w.title = "打开终端"
-        let container = NSView(frame: NSRect(origin: .zero, size: size))      // 同样套一层容器，避免 SwiftUI 自己改窗口大小
-        host.frame = container.bounds
-        host.autoresizingMask = [.width, .height]
-        container.addSubview(host)
-        w.contentView = container
-        w.setContentSize(size)
-        w.center()
-        w.isReleasedWhenClosed = false
-        w.level = .floating
+        let w = makeGlassWindow(title: "打开终端", floating: true) { view }
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
         window = w

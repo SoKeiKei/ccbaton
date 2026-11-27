@@ -1,6 +1,7 @@
 // CCBaton — 菜单栏里的 Claude Code 多账号小工具
 // 读额度、添加账号、一键切换 Claude Code 登录、给某个账号开终端、可选的额度预热。
-// 令牌只在钥匙串里被 /usr/bin/security 搬动（见 Switcher.swift），本程序的文件里不存令牌。
+// 终端的令牌只在钥匙串里被 /usr/bin/security 搬动（见 Switcher.swift），本程序的文件里不存。
+// 唯一的例外是可选的桌面端切换（Desktop.swift）：存的是 Claude 桌面应用自己加密过的登录副本，权限 0600。
 
 import SwiftUI
 import AppKit
@@ -52,6 +53,8 @@ struct AccountState {
     }
     /// 读到了能用的额度（没有 5 小时窗口的 Ultra 看周额度）
     var hasQuota: Bool { fiveHour != nil || (noFiveHour && sevenDay != nil) }
+    /// 可以对用户说"无 5 小时限制"：登录有效，而且真的读到了周额度（刚加进来、没数据、登录失效的不下结论）
+    var showsNoFiveHour: Bool { loggedIn && hasQuota && noFiveHour }
 }
 
 struct Store: Codable {
@@ -73,6 +76,8 @@ struct Store: Codable {
     var updateCheckedAt: Date?                   // 上次查到版本信息的时间
     var updateRelease: AppRelease?               // 查到的新版本（有它就在版本号前显示红点）
     var showRemaining: Bool?                     // 界面显示剩余额度而不是已用额度，默认关
+    var desktopEnabled: Bool?                    // 管理 Claude 桌面端账号（实验功能），默认关
+    var desktopSyncSessions: Bool?               // 换桌面端账号时同步各账号的 Code 对话列表，默认关（复制后撤不回来）
 
     init(accounts: [Account], workDir: String) { self.accounts = accounts; self.workDir = workDir }
 
@@ -80,7 +85,7 @@ struct Store: Codable {
     private struct Legacy: Codable { var id: String; var label: String; var configDir: String?; var renewalDay: Int?; var note: String? }
     private enum K: String, CodingKey {
         case accounts, workDir, widgetVisible, widgetOrigin, widgetSize, alertsEnabled, alerted, warmupEnabled, warmupStagger, warmupRecords
-        case recentDirs, terminalPrefs, terminalKept, colorSlots, autoUpdateCheck, updateCheckedAt, updateRelease, showRemaining
+        case recentDirs, terminalPrefs, terminalKept, colorSlots, autoUpdateCheck, updateCheckedAt, updateRelease, showRemaining, desktopEnabled, desktopSyncSessions
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -108,6 +113,8 @@ struct Store: Codable {
         updateCheckedAt = try? c.decode(Date.self, forKey: .updateCheckedAt)
         updateRelease = try? c.decode(AppRelease.self, forKey: .updateRelease)
         showRemaining = try? c.decode(Bool.self, forKey: .showRemaining)
+        desktopEnabled = try? c.decode(Bool.self, forKey: .desktopEnabled)
+        desktopSyncSessions = try? c.decode(Bool.self, forKey: .desktopSyncSessions)
     }
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: K.self)
@@ -129,6 +136,8 @@ struct Store: Codable {
         try c.encodeIfPresent(updateCheckedAt, forKey: .updateCheckedAt)
         try c.encodeIfPresent(updateRelease, forKey: .updateRelease)
         try c.encodeIfPresent(showRemaining, forKey: .showRemaining)
+        try c.encodeIfPresent(desktopEnabled, forKey: .desktopEnabled)
+        try c.encodeIfPresent(desktopSyncSessions, forKey: .desktopSyncSessions)
     }
 }
 
@@ -350,6 +359,29 @@ final class Model: ObservableObject {
     @Published var toast: String?          // 小组件顶部的短提示（切换结果），几秒后消失
     @Published var warming: String?        // 正在给哪个账号发预热消息
     var warmupHolds: [String: Date] = [:]  // 暂时放一放的账号（读不到最新额度）
+
+    // Claude 桌面端（见 Desktop.swift）；下面这些外部动作在测试里换掉
+    @Published var desktopPresent = false                // 这台 Mac 上装了桌面端、有它的数据目录（设置里才会出现总开关）
+    @Published var desktopAvailable = false              // 总开关也打开了：界面里才显示桌面端的状态和按钮，才会去读写桌面端的文件
+    @Published var desktopOwnerState: DesktopOwner = .none
+    @Published var desktopSaved: Set<String> = []        // 哪些账号保存了桌面端登录
+    @Published var desktopFlow: DesktopFlow?             // 正在进行的桌面端操作（面板上显示进度）
+    var desktopCancel = false
+    var desktopPollInterval: TimeInterval = 1
+    var desktopCookieWait: TimeInterval = 90
+    var desktopIsRunning: () -> Bool = { testRoot == nil && DesktopApp.isRunning() }
+    var desktopQuit: () async -> Bool = { testRoot == nil ? await DesktopApp.quit() : true }
+    var desktopLaunch: () -> Void = { if testRoot == nil { DesktopApp.launch() } }
+    var confirmDesktop: (_ title: String, _ message: String) -> Bool = { title, message in
+        if testRoot != nil { return true }
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "继续")
+        alert.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
     /// 切换会影响开着的终端时先问一下（测试里换掉）
     var confirmSwitch: (_ title: String, _ message: String) -> Bool = { title, message in
         if testRoot != nil { return true }
@@ -470,7 +502,7 @@ final class Model: ObservableObject {
         store = loaded.store
         storeWritable = loaded.writable
         storeProblem = loaded.problem
-        if !Model.readOnly { Switcher(dirOf: { _ in nil }).recover(); recoverMigration(); finishPendingUpdate() }
+        if !Model.readOnly { Switcher(dirOf: { _ in nil }).recover(); recoverMigration(); finishPendingUpdate(); recoverDesktop() }
         ensureLiveManaged()
         reloadStates()
         if let problem = loaded.problem {       // 等程序起来再弹，启动过程中弹窗会卡住
@@ -493,7 +525,7 @@ final class Model: ObservableObject {
             Task { await refreshAll(force: false); await warmupTick(); await keepTerminalLogins() }
             Task { await updateTick() }
         }
-        if !Model.readOnly { Task { @MainActor in WidgetController.shared.apply(self) } }
+        if !Model.readOnly { Task { @MainActor in WidgetController.shared.apply(self); StatusMenu.shared.install(self) } }
         if Driver.enabled { Task { @MainActor in try? await Task.sleep(nanoseconds: 1_500_000_000); Driver.start(self, seconds: 45) } }
     }
 
@@ -558,11 +590,20 @@ final class Model: ObservableObject {
             st.loggedIn = isLive || (idKey != nil && keychain.exists(.account(a.configDir)))
             states[a.id] = st
         }
+        reloadDesktop()
         checkAlerts()
     }
 
     var showRemaining: Bool { store.showRemaining ?? false }
     func setShowRemaining(_ on: Bool) { store.showRemaining = on; save() }
+
+    var desktopOn: Bool { store.desktopEnabled ?? false }
+    var desktopSyncOn: Bool { store.desktopSyncSessions ?? false }
+    func setDesktopSyncOn(_ on: Bool) { store.desktopSyncSessions = on; save() }
+    func setDesktopOn(_ on: Bool) {
+        guard desktopFlow == nil else { return }          // 桌面端操作进行中不能关
+        store.desktopEnabled = on; save(); reloadDesktop()
+    }
 
     var alertsOn: Bool { store.alertsEnabled ?? true }
 
@@ -570,7 +611,9 @@ final class Model: ObservableObject {
     func checkAlerts() {
         guard alertsOn, Alerter.enabled else { return }
         var done = Set(store.alerted ?? [])
-        let items = alertsToFire(accounts: store.accounts, states: states, alerted: done, name: { self.shortDisplayName($0) }, remaining: showRemaining)
+        var also: [String] = []
+        if case .account(let o) = desktopOwnerState { also.append(o.id) }          // 桌面端在用的账号也要提醒
+        let items = alertsToFire(accounts: store.accounts, states: states, alerted: done, name: { self.shortDisplayName($0) }, remaining: showRemaining, also: also)
         guard !items.isEmpty else { return }
         for it in items {
             done.formUnion(it.keys)

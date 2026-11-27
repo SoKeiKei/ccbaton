@@ -210,7 +210,7 @@ func runWarmupTest() -> Int32 {
     wait { await m.warmupTick() }
     check("一分钟后核对：确认 B 已开始计时", m.store.warmupRecords?["b"]?.status == .confirmed && (m.states["b"]?.fiveReset ?? .distantPast) > Date())
     let waiting: Bool = { if case .wait(let id, let t) = m.currentWarmupPlan() { return id == "c" && t.timeIntervalSinceNow > 5880 && t.timeIntervalSinceNow <= 6001 }; return false }()
-    check("错开中：下一个是 C，约 1 小时 40 分后", waiting && pings().count == 1 && m.warmupStatus.contains("错开中"))
+    check("错开中：下一个是 C，约 1 小时 40 分后", waiting && pings().count == 1 && m.warmupStatus.contains("错开"))
     check("记录存进了设置文件", (try? Data(contentsOf: storeURL)).flatMap { try? JSONDecoder().decode(Store.self, from: $0) }.map { $0.warmupRecords?["b"]?.status == .confirmed && $0.warmupEnabled == true } ?? false)
 
     m.store.warmupStagger = false
@@ -262,26 +262,28 @@ func runWarmupTest() -> Int32 {
     SettingsController.shared.open(m)
     pump(1.0)
     let w = SettingsController.shared.window
-    // 从上到下：开机启动、显示剩余额度、自动开始倒计时、错开、系统通知、显示小组件、自动检查更新
+    // 从上到下：开机启动、自动开始倒计时、错开、系统通知、显示小组件、自动检查更新（"额度显示"是已用 / 剩余的分段选择，不是开关）
     let switches = views(w?.contentView, NSSwitch.self).sorted { $0.convert($0.bounds, to: nil).midY > $1.convert($1.bounds, to: nil).midY }
-    check("设置窗口打开，有 7 个开关（实际 \(switches.count) 个）", w?.isVisible == true && switches.count == 7)
-    if switches.count == 7 {
-        check("剩余额度开关默认关着", !m.showRemaining && switches[1].state == .off)
-        switches[1].performClick(nil); pump(0.8)
-        check("点一下：改成显示剩余额度，并且存进设置文件", m.showRemaining && loadStore(readOnly: true).store.showRemaining == true && w?.attachedSheet == nil)
-        switches[1].performClick(nil); pump(0.8)
-        check("再点一下：回到显示已用额度", !m.showRemaining)
+    let quota = views(w?.contentView, NSSegmentedControl.self).first { $0.segmentCount == 2 && $0.label(forSegment: 0) == "已用" && $0.label(forSegment: 1) == "剩余" }
+    func pickQuota(_ i: Int) { guard let q = quota else { return }; q.selectedSegment = i; _ = q.sendAction(q.action, to: q.target) }
+    check("设置窗口打开，有 6 个开关（实际 \(switches.count) 个）和\"额度显示\"的已用 / 剩余选择", w?.isVisible == true && switches.count == 6 && quota != nil)
+    if switches.count == 6, let quota {
+        check("额度显示默认选着\"已用\"", !m.showRemaining && quota.selectedSegment == 0)
+        pickQuota(1); pump(0.8)
+        check("选\"剩余\"：改成显示剩余额度，并且存进设置文件", m.showRemaining && loadStore(readOnly: true).store.showRemaining == true && w?.attachedSheet == nil)
+        pickQuota(0); pump(0.8)
+        check("选回\"已用\"：回到显示已用额度", !m.showRemaining)
         func confirmButton(_ title: String) -> NSButton? { views(w?.attachedSheet?.contentView, NSButton.self).first { $0.title == title } }
-        switches[2].performClick(nil); pump(1.0)
+        switches[1].performClick(nil); pump(1.0)
         check("点预热开关：先弹确认框，还没开启", confirmButton("开启") != nil && !m.warmupOn)
         confirmButton("取消")?.performClick(nil); pump(1.0)
         check("点取消：保持关闭", w?.attachedSheet == nil && !m.warmupOn)
-        switches[2].performClick(nil); pump(1.0)
+        switches[1].performClick(nil); pump(1.0)
         confirmButton("开启")?.performClick(nil); pump(1.5)
         check("点开启：预热打开，并马上激活一个账号", m.warmupOn && pings().count == 1)
-        switches[3].performClick(nil); pump(1.5)
+        switches[2].performClick(nil); pump(1.5)
         check("点错开开关：关掉错开，其余账号接着激活", !m.staggerOn && pings().count == 3)
-        switches[2].performClick(nil); pump(0.8)
+        switches[1].performClick(nil); pump(0.8)
         check("再点预热开关：直接关闭，不弹框", !m.warmupOn && w?.attachedSheet == nil)
     }
     w?.close()

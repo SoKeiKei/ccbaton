@@ -102,6 +102,7 @@ extension Model {
         if switching { return "正在切换账号，几秒后再试" }
         if warming != nil { return "正在预热账号，几秒后再试" }
         if refreshing { return "正在读取额度，几秒后再试" }
+        if desktopFlow != nil { return "正在处理桌面端，几秒后再试" }
         return nil
     }
 
@@ -118,6 +119,7 @@ extension Model {
         let off = terminals.filter { $0.accountId == a.id && $0.mode != .live }.count
         if off > 0 { lines.append("有 \(off) 个用它开着的终端会掉线。") }
         if ccSwitch && ccSwitchRunning() { lines.append("检测到 cc-switch 正在运行，建议先退出它再移除。") }
+        if desktopSaved.contains(a.id) { lines.append("它保存的 Claude 桌面端登录也会一起删掉（桌面端现在登录的账号不受影响，只是以后不能一键切换到它）。") }
         lines.append("不受影响：Claude 账号和订阅、对话记录、Claude 设置。")
         return RemovalPrompt(title: "彻底移除「\(name)」？", message: lines.joined(separator: "\n\n"), button: "彻底移除")
     }
@@ -161,6 +163,7 @@ extension Model {
             }
         } catch { return "移除失败：\(error)" }
         fillColorSlots()                    // 剩下的账号颜色保持不变
+        try? FileManager.default.removeItem(atPath: desktopSlot(a))        // 它保存的桌面端登录也删掉
         store.accounts.removeAll { $0.id == a.id }
         store.warmupRecords?[a.id] = nil
         store.terminalPrefs?[a.id] = nil

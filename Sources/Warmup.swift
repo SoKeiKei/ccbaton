@@ -145,7 +145,7 @@ extension Model {
         case .wait(let id, let t):
             if let r = store.warmupRecords?[id], r.status == .failed { return "「\(name(id))」上次没成功，\(clockText(t)) 再试" }
             if warmupHolds[id].map({ $0 > Date() }) ?? false { return "暂时读不到「\(name(id))」的额度，\(clockText(t)) 再看" }
-            return "「\(name(id))」约 \(clockText(t)) 激活（错开中）"
+            return "「\(name(id))」为了和其他账号错开，约 \(clockText(t)) 自动开始计时"
         case .counting(let next): return "各账号都在计时" + (next.map { "，最早 \(clockText($0)) 重置" } ?? "")
         case .none: return "没有可预热的账号（未登录、周额度用完或还没读到额度）"
         }
