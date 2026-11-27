@@ -6,7 +6,7 @@
 
 *English: CCBaton is a native macOS menu-bar app and desktop widget for people who use several Claude Code subscriptions. It shows each account's 5-hour / 7-day quota, switches the account Claude Code is signed in with in one click, opens a terminal per account with a directory picker and launch options (shielded from third-party API settings; optional full isolation from account switching), warns you before a quota runs out, updates itself in one click from signed GitHub releases, and can optionally (off by default) start idle accounts' 5-hour windows early, staggered so they reset at different times. Swift, no dependencies, MIT licensed. Unofficial — not affiliated with Anthropic.*
 
-> 当前版本 **1.4.0**　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)　·　macOS 14 或更高
+> 当前版本 **1.4.1**　·　[下载安装包](https://github.com/SoKeiKei/ccbaton/releases/latest)　·　macOS 14 或更高
 
 <p align="center"><img src="docs/screenshots/hero.png" width="860" alt="CCBaton 总览：菜单栏面板带换号建议、额度告警和预热状态，右边是中号和大号桌面小组件"></p>
 
@@ -18,7 +18,7 @@
 
 | 功能 | 说明 |
 |---|---|
-| [看额度](#菜单栏面板) | 每个账号的 5 小时额度、7 天额度、多久后重置；可以按[已用或剩余](#已用还是剩余)显示 |
+| [看额度](#菜单栏面板) | 每个账号的 5 小时额度、7 天额度、多久后重置；可以按[已用或剩余](#已用还是剩余)显示；[Ultra](#ultra-套餐没有-5-小时限制) 没有 5 小时限制，只显示周额度 |
 | [一键切换](#菜单栏面板) | 换掉 Claude Code 登录的账号。新开的和正在运行的普通 `claude`，下一条消息起都用新账号 |
 | [额度告警](#额度告警) | 用量吃紧变橙、告急变红，面板顶部建议换号；快用完时弹系统通知 |
 | [打开终端](#打开终端) | 给某个账号单独开终端：现选目录、可加启动参数；可选"完全独立"，切换账号也不影响它 |
@@ -30,6 +30,8 @@
 | [从 cc-switch 迁过来](#从-cc-switch-迁过来) | 导入在 [cc-switch](https://github.com/farion1231/cc-switch) 里登录过的 Claude 账号，还可以把它们的文件迁到 CCBaton 自己的目录，不用重新登录 |
 | [设置窗口](#设置窗口) | 开机启动、预热、提醒、小组件集中在一处 |
 | [软件更新](#软件更新) | 有新版时版本号前亮红点，点一下自动下载安装，只装签名对得上的包 |
+
+**1.4.1 新增**：[Ultra 套餐](#ultra-套餐没有-5-小时限制)（原 Max 20x）的专门显示：套餐名认得出，没有 5 小时限制的账号只显示周额度。
 
 **1.4.0 新增**：[显示剩余额度](#已用还是剩余)开关；修正切换账号后原账号额度显示不对。
 
@@ -102,6 +104,21 @@ open build/CCBaton.app
 
 <p align="center"><img src="docs/screenshots/remaining.png" width="760" alt="打开显示剩余额度后的菜单栏面板、小号和中号小组件"><br><sub>打开"显示剩余额度"后：96% 已用显示成剩 4%</sub></p>
 
+### Ultra 套餐：没有 5 小时限制
+
+2026 年 10 月 30 日起，Claude 把 Max 20x（200 美元）改名为 **Ultra**，原来的 Max 5x 改叫 Max。Ultra 的周额度是 Pro 的 10 倍，**认证过的账号没有 5 小时限制**，还没认证的账号会有临时的 5 小时限制（官方说明见 [What is the Ultra plan?](https://support.claude.com/en/articles/17728952-what-is-the-ultra-plan)）。
+
+CCBaton 对它这样处理：
+
+- **套餐名**：Claude Code 里它仍记作 Max，只有档位信息（`rateLimitTier`）不同，CCBaton 靠这个把 20x 档显示成 Ultra、5x 档显示成 Max。认不出的套餐照原样显示。
+- **没有 5 小时窗口就不显示 5 小时**：面板卡片只留一条周额度，标"无 5 小时限制"；紧凑行、小组件、账号菜单同理；菜单栏图标变成一圈周额度，数字也是周额度。账号的 5 小时窗口里有真实用量和重置时间（还没认证）时，照常显示。
+- **提醒、换号建议、预热**：只按周额度算。没有 5 小时窗口的账号没得预热，所以不参与。
+- **只对 Ultra 这样处理**：别的套餐读不到 5 小时额度，仍显示"暂无数据"，免得把读取失败当成没有限制。
+
+> **说明**：开发者手上没有 Ultra 账号，这部分是按官方说明和别人公开的配置样例做的，没有在真实的 Ultra 账号上试过。如果你的 Ultra 账号显示不对（比如套餐名不是 Ultra、还出现 5 小时那一栏、数字和 Claude 官网对不上），请到 [Issues](https://github.com/SoKeiKei/ccbaton/issues) 反馈，最好附上 `~/.claude.json` 里 `cachedUsageUtilization` 下 `five_hour`、`limits` 的内容（不含邮箱等个人信息）。
+
+<p align="center"><img src="docs/screenshots/ultra.png" width="760" alt="Ultra 账号的菜单栏面板、小号和中号小组件，只有周额度"><br><sub>Ultra 账号：只有周额度，没有 5 小时那一栏</sub></p>
+
 ### 账号多的时候
 
 5 个以内都是大卡片。**6 个起**自动换成紧凑布局：使用中的账号还是大卡片，其他每个一行。账号多到超出屏幕时，中间部分可以滚动。
@@ -117,7 +134,7 @@ open build/CCBaton.app
 - 紧凑行里两个蓝色图标分别是"切换"和"终端"。鼠标停在名字上能看到套餐和两个重置时间；改名、写备注用右键。
 - 每个账号有固定的头像颜色，调整顺序后不变。
 
-菜单栏图标是双环：**外圈 5 小时，内圈 7 天**。用量吃紧时变橙、告急时变红，带淡淡的光晕（下面分别是 42% / 85% / 96%）：
+菜单栏图标是双环：**外圈 5 小时，内圈 7 天**。用量吃紧时变橙、告急时变红，带淡淡的光晕（下面分别是 42% / 85% / 96%；最右是[没有 5 小时限制的 Ultra](#ultra-套餐没有-5-小时限制)，只有一圈周额度）：
 
 <table>
   <tr>
@@ -197,7 +214,7 @@ Claude 的 5 小时额度要等你发出第一条消息才开始计时。几个�
 - 某个账号一空闲（没有在计时），CCBaton 就让 `claude` 给它发一条极短的消息（Haiku 模型，不带工具、插件和你的设置，不保存对话），倒计时随即开始。同时有几个空闲时，先激活 7 天额度剩得多的。
 - **错开**（默认开）：两次激活至少隔 5 小时 ÷ 能预热的账号数。3 个账号就是 1 小时 40 分，排开之后每隔这么久就有一个账号重置。急着用某个账号时直接用就行，不受限制。
 - 发之前会先重新读额度确认它真的空闲；发完一两分钟后再核对倒计时有没有开始。没成功的 30 分钟后重试，连续失败 3 次后 5 小时才试一次。读不到最新额度（比如断网）时不发。
-- 7 天额度已用完、登录失效的账号不会发。
+- 7 天额度已用完、登录失效的账号不会发。[Ultra](#ultra-套餐没有-5-小时限制) 没有 5 小时窗口，也不参与预热。
 
 现在轮到谁、几点激活，面板底部和设置窗口里都看得到。
 
@@ -503,6 +520,12 @@ rm -rf "$T"
 ---
 
 ## 版本记录
+
+### 1.4.1（2026-11-27）
+- 认得 **Ultra** 套餐（原 Max 20x）：以前它和 Max 5x 一样显示成"Max"，现在按档位区分
+- Ultra 认证过的账号没有 5 小时限制，不再显示"5 小时 — / 暂无数据"：面板、紧凑行、桌面小组件、账号菜单只显示周额度，菜单栏图标是一圈周额度；提醒和换号建议只按周额度算，不参与额度预热
+- 只对 Ultra 这样处理，别的套餐缺 5 小时数据时仍提示"暂无数据"
+- 这部分**还没有在真实的 Ultra 账号上试过**（开发者没有 Ultra 账号），显示不对请到 Issues 反馈
 
 ### 1.4.0（2026-11-26）
 - 新增**显示剩余额度**开关（设置 → 通用，默认关）：打开后面板、菜单栏、桌面小组件、换号建议和系统通知都改成显示还剩多少；告警和推荐账号的时机不变

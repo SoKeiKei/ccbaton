@@ -71,7 +71,7 @@ func effectiveUse(_ value: Double?, _ reset: Date?, now: Date = Date()) -> Doubl
 /// 推荐换到哪个账号：没在用、登录有效、读得到额度，5 小时和 7 天里更高的那个最低（且低于 70%）
 func recommendedAccount(accounts: [Account], states: [String: AccountState], now: Date = Date()) -> (account: Account, used: Double)? {
     accounts.compactMap { a -> (account: Account, used: Double)? in
-        guard let s = states[a.id], !s.live, s.loggedIn, s.fiveHour != nil else { return nil }
+        guard let s = states[a.id], !s.live, s.loggedIn, s.hasQuota else { return nil }
         let used = max(effectiveUse(s.fiveHour, s.fiveReset, now: now), effectiveUse(s.sevenDay, s.sevenReset, now: now))
         return used < roomyBelow ? (a, used) : nil
     }
@@ -195,6 +195,7 @@ struct AccountRow: View {
         if let r = model.renewal(account) { return r.text }
         if !st.loggedIn { return "需要重新登录" }
         if let w = st.sevenDay, w >= 80, w >= (st.fiveHour ?? 0) { return "周 " + resetText(st.sevenReset) }
+        if st.noFiveHour { return st.sevenDay == nil ? "暂无数据" : "周 " + resetText(st.sevenReset) }
         if st.fiveHour == nil { return "暂无数据" }
         return st.fiveIdle ? "未开始计时" : resetText(st.fiveReset)
     }
@@ -203,7 +204,7 @@ struct AccountRow: View {
         var lines = [model.displayName(account) + (st.plan.isEmpty ? "" : "（\(st.plan)）")]
         if let r = model.renewal(account) { lines.append("续期：\(monthDayText(r.date))") }
         if st.loggedIn {
-            lines.append("5 小时：" + (st.fiveIdle ? "未开始计时" : resetText(st.fiveReset)))
+            lines.append(st.noFiveHour ? "5 小时：无限制" : "5 小时：" + (st.fiveIdle ? "未开始计时" : resetText(st.fiveReset)))
             lines.append("7 天：" + resetText(st.sevenReset))
         }
         return lines.joined(separator: "\n")
@@ -223,7 +224,7 @@ struct AccountRow: View {
             .frame(width: 86, alignment: .leading)
             .help(tip)
             if st.loggedIn {
-                MiniMeter(title: "5时", value: st.fiveHour, remaining: model.showRemaining)
+                if !st.noFiveHour { MiniMeter(title: "5时", value: st.fiveHour, remaining: model.showRemaining) }
                 MiniMeter(title: "7天", value: st.sevenDay, remaining: model.showRemaining)
                 HStack(spacing: 5) {
                     Button { model.switchTo(account) } label: { Image(systemName: "arrow.left.arrow.right").frame(width: 13, height: 13) }
@@ -385,7 +386,7 @@ enum AccountPopup {
         for a in accounts {
             let s = model.states[a.id] ?? AccountState()
             func pct(_ v: Double?) -> String { (model.showRemaining ? "剩 " : "") + quotaText(v, remaining: model.showRemaining) }
-            let info = s.loggedIn ? "5 小时 \(pct(s.fiveHour)) · 7 天 \(pct(s.sevenDay))" : "需要重新登录"
+            let info = !s.loggedIn ? "需要重新登录" : (s.noFiveHour ? "7 天 \(pct(s.sevenDay)) · 无 5 小时限制" : "5 小时 \(pct(s.fiveHour)) · 7 天 \(pct(s.sevenDay))")
             let due = model.renewal(a).map { "　\($0.text)" } ?? ""
             let item = ActionMenuItem("\(model.shortDisplayName(a))　\(info)\(a.id == recommended ? "　推荐" : "")\(due)") { onSwitch(a) }
             item.isEnabled = s.loggedIn && !s.live

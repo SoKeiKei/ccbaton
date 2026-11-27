@@ -43,7 +43,7 @@ enum WarmupPlan: Equatable {
 
 /// 能预热的账号：登录有效、读得到 5 小时额度、周额度没用完
 func warmupEligible(_ s: AccountState, now: Date) -> Bool {
-    guard s.loggedIn, s.fiveHour != nil else { return false }
+    guard s.loggedIn, s.fiveHour != nil, !s.noFiveHour else { return false }     // 没有 5 小时窗口的账号没得预热
     if let w = s.sevenDay, w >= 100, s.sevenReset.map({ $0 > now }) ?? true { return false }
     return true
 }

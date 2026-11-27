@@ -75,14 +75,19 @@ struct DualRing: View {
     let five: Double?
     let seven: Double?
     let remaining: Bool
+    var weeklyOnly = false       // 没有 5 小时窗口：只有一圈周额度
     var body: some View {
         ZStack {
-            ringLayer(value: five, diameter: 78, width: 8)
-            ringLayer(value: seven, diameter: 55, width: 8)
+            if weeklyOnly {
+                ringLayer(value: seven, diameter: 78, width: 8)
+            } else {
+                ringLayer(value: five, diameter: 78, width: 8)
+                ringLayer(value: seven, diameter: 55, width: 8)
+            }
             VStack(spacing: 0) {
-                Text(quotaText(five, remaining: remaining))
+                Text(quotaText(weeklyOnly ? seven : five, remaining: remaining))
                     .font(.system(size: 18, weight: .semibold, design: .rounded)).monospacedDigit()
-                Text(remaining ? "5时剩余" : "5 小时").font(.system(size: 9)).foregroundStyle(.secondary)
+                Text(weeklyOnly ? (remaining ? "7天剩余" : "7 天") : (remaining ? "5时剩余" : "5 小时")).font(.system(size: 9)).foregroundStyle(.secondary)
             }
         }
     }
@@ -188,10 +193,21 @@ struct WidgetView: View {
                 if let r = a.flatMap({ model.renewal($0) }) { renewalLabel(r) }
             }
             Spacer(minLength: 0)
-            DualRing(five: st?.fiveHour, seven: st?.sevenDay, remaining: model.showRemaining)
+            DualRing(five: st?.fiveHour, seven: st?.sevenDay, remaining: model.showRemaining, weeklyOnly: st?.noFiveHour ?? false)
             Spacer(minLength: 0)
             HStack(spacing: 6) {
-                Text("7 天 \(quotaText(st?.sevenDay, remaining: model.showRemaining))").font(.system(size: 10)).foregroundStyle(.secondary)
+                Group {
+                    if st?.noFiveHour ?? false {
+                        ViewThatFits(in: .horizontal) {      // 右边头像多的时候放不下，换短一点的说法
+                            Text("无 5 小时限制")
+                            Text("无 5 时限制")
+                            Text("仅周额度")
+                        }
+                    } else {
+                        Text("7 天 \(quotaText(st?.sevenDay, remaining: model.showRemaining))")
+                    }
+                }
+                .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 0)
                 ForEach(others.shown) { o in
                     let os = model.states[o.id] ?? AccountState()
@@ -264,7 +280,7 @@ struct WidgetView: View {
             }
             .frame(width: 70, alignment: .leading)
             if st.loggedIn {
-                StackMeter(title: "5 小时", value: st.fiveHour, remaining: model.showRemaining)
+                if !st.noFiveHour { StackMeter(title: "5 小时", value: st.fiveHour, remaining: model.showRemaining) }
                 StackMeter(title: "7 天", value: st.sevenDay, remaining: model.showRemaining)
             } else {
                 Text("登录已失效，需要重新登录").font(.system(size: 10)).foregroundStyle(.orange)
@@ -323,7 +339,7 @@ struct WidgetView: View {
                 }
                 if st.loggedIn {
                     HStack(spacing: 6) {
-                        MiniMeter(title: "5时", value: st.fiveHour, remaining: model.showRemaining)
+                        if !st.noFiveHour { MiniMeter(title: "5时", value: st.fiveHour, remaining: model.showRemaining) }
                         MiniMeter(title: "7天", value: st.sevenDay, remaining: model.showRemaining)
                     }
                 } else {
@@ -353,10 +369,7 @@ struct WidgetView: View {
                                 Spacer(minLength: 0)
                             }
                             if st.loggedIn {
-                                HStack(alignment: .top, spacing: 16) {
-                                    Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset, idle: st.fiveIdle, remaining: model.showRemaining)
-                                    Meter(title: "7 天", value: st.sevenDay, reset: st.sevenReset, remaining: model.showRemaining)
-                                }
+                                QuotaMeters(st: st, remaining: model.showRemaining, spacing: 16)
                             } else {
                                 Text("登录已失效，需要重新登录").font(.system(size: 11)).foregroundStyle(.orange)
                             }

@@ -43,6 +43,15 @@ struct AccountState {
     var fiveIdle = false      // 服务器明确说现在没有 5 小时窗口（还没开始计时）
     var sevenReset: Date?
     var fetchedAt: Date?
+
+    /// Ultra（原 Max 20x）认证过的账号没有 5 小时限制，只有周额度。
+    /// 缓存里没有 5 小时窗口、或者窗口是 0 而且没在计时，就当成没有；有真实用量或重置时间（还没认证的账号）仍按 5 小时显示。
+    /// 只对 Ultra 这么判断：别的套餐读不到 5 小时额度就是缺数据，要照旧提示。
+    var noFiveHour: Bool {
+        plan == "Ultra" && !((fiveHour ?? 0) > 0 || (fiveReset != nil && !fiveIdle))
+    }
+    /// 读到了能用的额度（没有 5 小时窗口的 Ultra 看周额度）
+    var hasQuota: Bool { fiveHour != nil || (noFiveHour && sevenDay != nil) }
 }
 
 struct Store: Codable {
@@ -192,6 +201,19 @@ func parseDate(_ s: Any?) -> Date? {
     return isoFrac.date(from: s) ?? isoPlain.date(from: s)
 }
 
+/// 套餐显示名。2026-10-30 起 Max 20x 改名 Ultra、Max 5x 改名 Max，但 Claude Code 里的类型仍是 claude_max，
+/// 只能靠 rateLimitTier（default_claude_max_20x / default_claude_max_5x）区分；认不出的套餐原样显示。
+func planLabel(org: String, tier: String) -> String {
+    switch org {
+    case "claude_pro": return "Pro"
+    case "claude_max": return tier.lowercased().hasSuffix("max_20x") ? "Ultra" : "Max"
+    case "claude_ultra": return "Ultra"        // 以后 Claude Code 若直接用这个名字
+    case "claude_team": return "Team"
+    case "claude_enterprise": return "Enterprise"
+    default: return org
+    }
+}
+
 /// 从一个 .claude.json 读账号资料和 Claude Code 缓存的额度
 func readState(path: String) -> AccountState {
     var st = AccountState()
@@ -199,8 +221,8 @@ func readState(path: String) -> AccountState {
     st.email = oauth["emailAddress"] as? String ?? ""
     st.orgName = oauth["organizationName"] as? String ?? ""
     let org = oauth["organizationType"] as? String ?? ""
-    let plans = ["claude_pro": "Pro", "claude_max": "Max", "claude_team": "Team", "claude_enterprise": "Enterprise"]
-    st.plan = plans[org] ?? org
+    let tier = (oauth["organizationRateLimitTier"] as? String) ?? (oauth["userRateLimitTier"] as? String) ?? ""
+    st.plan = planLabel(org: org, tier: tier)
     if let cached = doc["cachedUsageUtilization"] as? [String: Any],
        let util = cached["utilization"] as? [String: Any] {
         // 缓存跟账号走，账号对不上就不信

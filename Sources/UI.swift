@@ -44,7 +44,7 @@ func agoText(_ d: Date?) -> String {
 // MARK: - 菜单栏图标：外圈 5 小时、内圈 7 天
 
 /// 正常时用模板图（系统自动适配深浅色菜单栏）；吃紧（alert=1）或告急（alert=2）时用彩色，并在外圈加一层淡淡的光晕。
-func ringIcon(five: Double?, seven: Double?, alert: Int, remaining: Bool = false, size: CGFloat = 18) -> NSImage {
+func ringIcon(five: Double?, seven: Double?, alert: Int, remaining: Bool = false, weeklyOnly: Bool = false, size: CGFloat = 18) -> NSImage {
     let hot = alert > 0
     let canvas = size + 6                       // 留出光晕的位置；大小固定，菜单栏图标不会因告警而跳动
     let img = NSImage(size: NSSize(width: canvas, height: canvas), flipped: false) { rect in
@@ -86,8 +86,12 @@ func ringIcon(five: Double?, seven: Double?, alert: Int, remaining: Bool = false
             color.setStroke()
             arc.stroke()
         }
-        ring(size * 0.40, five)
-        ring(size * 0.20, seven)
+        if weeklyOnly {
+            ring(size * 0.40, seven)            // 没有 5 小时窗口：只画周额度，占外圈
+        } else {
+            ring(size * 0.40, five)
+            ring(size * 0.20, seven)
+        }
         return true
     }
     img.isTemplate = !hot
@@ -99,8 +103,9 @@ struct BarLabel: View {
     var body: some View {
         let st = model.live.flatMap { model.states[$0.id] }
         HStack(spacing: 4) {
-            Image(nsImage: ringIcon(five: st?.fiveHour, seven: st?.sevenDay, alert: st?.level ?? 0, remaining: model.showRemaining))
-            if let f = st?.fiveHour { Text(quotaText(f, remaining: model.showRemaining)).monospacedDigit() }
+            Image(nsImage: ringIcon(five: st?.fiveHour, seven: st?.sevenDay, alert: st?.level ?? 0, remaining: model.showRemaining,
+                                    weeklyOnly: st?.noFiveHour ?? false))
+            if let f = (st?.noFiveHour ?? false) ? st?.sevenDay : st?.fiveHour { Text(quotaText(f, remaining: model.showRemaining)).monospacedDigit() }
         }
     }
 }
@@ -135,6 +140,21 @@ struct Meter: View {
                 .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// 一个账号的额度条：一般是 5 小时 + 7 天两条；没有 5 小时窗口的 Ultra 只有一条周额度
+struct QuotaMeters: View {
+    let st: AccountState
+    let remaining: Bool
+    var spacing: CGFloat = 14
+    var body: some View {
+        HStack(alignment: .top, spacing: spacing) {
+            if !st.noFiveHour {
+                Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset, idle: st.fiveIdle, remaining: remaining)
+            }
+            Meter(title: "7 天", value: st.sevenDay, reset: st.sevenReset, remaining: remaining)
+        }
     }
 }
 
@@ -173,6 +193,7 @@ struct AccountCard: View {
                     HStack(spacing: 5) {
                         if isActive { Tag(text: "使用中", tint: .green) }
                         if !st.plan.isEmpty { Tag(text: st.plan) }
+                        if st.noFiveHour && st.loggedIn { Tag(text: "无 5 小时限制", tint: .teal) }
                         if recommended { Tag(text: "推荐", tint: .accentColor) }
                     }
                 }
@@ -196,10 +217,7 @@ struct AccountCard: View {
                 }
             }
             if st.loggedIn {
-                HStack(alignment: .top, spacing: 14) {
-                    Meter(title: "5 小时", value: st.fiveHour, reset: st.fiveReset, idle: st.fiveIdle, remaining: model.showRemaining)
-                    Meter(title: "7 天", value: st.sevenDay, reset: st.sevenReset, remaining: model.showRemaining)
-                }
+                QuotaMeters(st: st, remaining: model.showRemaining, spacing: 14)
             } else {
                 Label("登录已失效或还没登录，点右上角「重新登录」，授权完成后点刷新", systemImage: "exclamationmark.circle")
                     .font(.caption).foregroundStyle(.orange)
@@ -508,6 +526,35 @@ func renderReadmeShots(to dir: String) {
     renderPNG(Remaining(model: model, wall: wall), dark: true, path: dir + "/remaining.png")
     model.store.showRemaining = false
 
+    // Ultra（原 Max 20x）：认证过的账号没有 5 小时限制，只显示周额度。换用演示数据的第一个账号。
+    let beforeUltra = model.states
+    model.states["d1"]?.plan = "Ultra"
+    model.states["d1"]?.fiveHour = nil
+    model.states["d1"]?.fiveReset = nil
+    model.states["d1"]?.fiveIdle = false
+    model.states["d1"]?.sevenDay = 38
+    struct UltraShot: View {
+        @ObservedObject var model: Model
+        let wall: LinearGradient
+        var body: some View {
+            HStack(alignment: .top, spacing: 18) {
+                MenuView(model: model)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
+                    .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
+                VStack(spacing: 4) {
+                    ForEach([WidgetSize.small, .medium], id: \.self) { s in
+                        WidgetView(model: model, forceSize: s).frame(width: s.width, height: s.height)
+                    }
+                }
+            }
+            .padding(30).background(wall)
+        }
+    }
+    renderPNG(UltraShot(model: model, wall: wall), dark: true, path: dir + "/ultra.png")
+    model.states = beforeUltra
+
     // 设置窗口
     model.store.widgetVisible = true         // 只改内存里的，不保存
     model.store.widgetSize = "medium"
@@ -620,9 +667,10 @@ func renderReadmeShots(to dir: String) {
         let wall: LinearGradient
         var body: some View {
             HStack(spacing: 26) {
-                ForEach([(42.0, 61.0, 0), (85.0, 61.0, 1), (96.0, 61.0, 2)], id: \.0) { p in
+                // 最后一个：Ultra 没有 5 小时窗口，只有一圈周额度，数字也是周额度
+                ForEach([(42.0, 61.0, 0, false), (85.0, 61.0, 1, false), (96.0, 61.0, 2, false), (38.0, 38.0, 0, true)], id: \.0) { p in
                     HStack(spacing: 5) {
-                        Image(nsImage: ringIcon(five: p.0, seven: p.1, alert: p.2)).resizable().frame(width: 40, height: 40)
+                        Image(nsImage: ringIcon(five: p.0, seven: p.1, alert: p.2, weeklyOnly: p.3)).resizable().frame(width: 40, height: 40)
                         Text("\(Int(p.0))%").font(.system(size: 28, weight: .medium)).monospacedDigit()
                     }
                 }
@@ -829,6 +877,48 @@ struct ClaudeAccountBarApp: App {
             check("没设过开关的旧设置文件：默认已用", reread(saved)?.showRemaining == nil)
             saved.showRemaining = true
             check("开关能存下来", reread(saved)?.showRemaining == true)
+
+            // —— Ultra（原 Max 20x）：没有 5 小时窗口 ——
+            check("套餐名：max + 20x 档 = Ultra，5x 档 = Max，没档位信息 = Max",
+                  planLabel(org: "claude_max", tier: "default_claude_max_20x") == "Ultra" && planLabel(org: "claude_max", tier: "default_claude_max_5x") == "Max" && planLabel(org: "claude_max", tier: "") == "Max")
+            check("套餐名：Pro/Team/Enterprise 不变，认不出的原样，以后直接叫 claude_ultra 也行",
+                  planLabel(org: "claude_pro", tier: "") == "Pro" && planLabel(org: "claude_team", tier: "") == "Team" && planLabel(org: "claude_enterprise", tier: "") == "Enterprise"
+                  && planLabel(org: "claude_x", tier: "") == "claude_x" && planLabel(org: "claude_ultra", tier: "") == "Ultra")
+            let tmp = NSTemporaryDirectory() + "ccb-ultra-\(getpid())"
+            try? FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(atPath: tmp) }
+            func profile(_ name: String, tier: String?, five: String?) -> AccountState {
+                var oauth: [String: Any] = ["accountUuid": "u", "emailAddress": "u@example.com", "organizationType": "claude_max"]
+                if let tier { oauth["organizationRateLimitTier"] = tier }
+                var util: [String: Any] = ["seven_day": ["utilization": 30, "resets_at": "2099-01-01T00:00:00+00:00"]]
+                if let five, let d = try? JSONSerialization.jsonObject(with: Data(five.utf8)) { util["five_hour"] = d }
+                let doc: [String: Any] = ["oauthAccount": oauth, "cachedUsageUtilization": ["accountUuid": "u", "fetchedAtMs": 1.0, "utilization": util]]
+                let path = tmp + "/" + name + ".json"
+                try? JSONSerialization.data(withJSONObject: doc).write(to: URL(fileURLWithPath: path))
+                return readState(path: path)
+            }
+            let uAbsent = profile("absent", tier: "default_claude_max_20x", five: nil)
+            let uNull = profile("null", tier: "default_claude_max_20x", five: "null")
+            let uNullUtil = profile("nullutil", tier: "default_claude_max_20x", five: "{\"utilization\": null, \"resets_at\": null}")
+            let uIdle = profile("idle", tier: "default_claude_max_20x", five: "{\"utilization\": 0, \"resets_at\": null}")
+            let uTimed = profile("timed", tier: "default_claude_max_20x", five: "{\"utilization\": 12, \"resets_at\": \"2099-01-01T00:00:00+00:00\"}")
+            let m5 = profile("max5", tier: "default_claude_max_5x", five: nil)
+            check("读取：缓存里的 tier 让 Max 20x 账号显示 Ultra", uAbsent.plan == "Ultra" && m5.plan == "Max")
+            check("Ultra：没有 five_hour / 为 null / 用量为 null / 是 0 且没计时，都当成没有 5 小时窗口",
+                  [uAbsent, uNull, uNullUtil, uIdle].allSatisfy { $0.noFiveHour })
+            check("Ultra：这几种情况仍然读得到周额度，算有数据", [uAbsent, uNull, uNullUtil, uIdle].allSatisfy { $0.hasQuota && $0.sevenDay == 30 })
+            check("Ultra：窗口有真实用量和重置时间（还没认证的账号）仍按 5 小时显示", !uTimed.noFiveHour && uTimed.fiveHour == 12)
+            check("Max 5x 缺 5 小时数据不当成无限制，仍提示暂无数据", !m5.noFiveHour && !m5.hasQuota)
+            check("Ultra 周额度告急（96%）照样亮灯", { var s = uAbsent; s.sevenDay = 96; return s.level == 2 }())
+            var uLive = uAbsent; uLive.live = true; uLive.loggedIn = true; uLive.sevenDay = 92; uLive.sevenReset = later
+            let ur = alertsToFire(accounts: accs, states: ["a": uLive, "b": st(10), "c": st(20)], alerted: [], name: { $0.label })
+            check("Ultra 周额度到 92%：只弹 7 天那一条", ur.count == 1 && ur[0].title.contains("7 天") && !ur[0].title.contains("5 小时"))
+            var uOther = uAbsent; uOther.loggedIn = true; uOther.sevenDay = 20; uOther.sevenReset = later
+            check("别的账号快用完时，没有 5 小时窗口的 Ultra 能被推荐", recommendedAccount(accounts: accs, states: ["a": st(92, live: true), "b": uOther, "c": st(90)])?.account.id == "b")
+            check("预热：没有 5 小时窗口的 Ultra 不参与预热", !warmupEligible(uOther, now: Date()) && warmupEligible(st(0), now: Date()))
+            _ = ringIcon(five: nil, seven: 40, alert: 0, weeklyOnly: true)
+            _ = ringIcon(five: nil, seven: 96, alert: 2, remaining: true, weeklyOnly: true)
+            check("菜单栏圆环：只有周额度时能画出来", true)
             print(failed == 0 ? "\n全部通过" : "\n有 \(failed) 项失败")
             exit(failed == 0 ? 0 : 1)
         }
